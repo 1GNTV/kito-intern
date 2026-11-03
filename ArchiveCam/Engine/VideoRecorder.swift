@@ -12,6 +12,7 @@ final class VideoRecorder {
     private var firstTime: CMTime?
     private(set) var appendedFrames = 0
     private var videoBackpressure = false
+    private var audioBackpressure = false
 
     init?(profile: CameraProfile, microphone: Bool) {
         let directory = FileManager.default.temporaryDirectory
@@ -90,18 +91,22 @@ final class VideoRecorder {
         guard let audioInput, let firstTime,
               CMSampleBufferDataIsReady(sampleBuffer),
               CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= firstTime,
-              writer.status == .writing,
-              audioInput.isReadyForMoreMediaData else { return }
-        _ = audioInput.append(sampleBuffer)
+              writer.status == .writing else { return }
+        guard audioInput.isReadyForMoreMediaData, audioInput.append(sampleBuffer) else {
+            audioBackpressure = true
+            return
+        }
     }
 
+    func noteDroppedVideoFrame() { videoBackpressure = true }
+
     func finish(_ completion: @escaping (Result<URL, Error>) -> Void) {
-        guard !videoBackpressure else {
+        guard !videoBackpressure && !audioBackpressure else {
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: url)
             completion(.failure(NSError(
                 domain: "ArchiveCam", code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Encoder could not keep up; recording discarded."]
+                userInfo: [NSLocalizedDescriptionKey: "Capture or encoder could not keep up; recording discarded."]
             )))
             return
         }

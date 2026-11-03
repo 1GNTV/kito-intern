@@ -205,7 +205,7 @@ final class CaptureEngine: NSObject, ObservableObject,
 
     func shootPhoto() {
         captureQueue.async {
-            guard self.configured, self.recorder == nil else { return }
+            guard self.configured, self.recorder == nil, self.photoProfile == nil else { return }
             let settings = AVCapturePhotoSettings()
             settings.photoQualityPrioritization = .quality
             if self.camera?.hasFlash == true {
@@ -316,6 +316,15 @@ final class CaptureEngine: NSObject, ObservableObject,
         recorder?.appendVideo(frame.pixelBuffer, at: time)
     }
 
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didDrop sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        // The capture output discarded a source frame before it reached our sampler.
+        if output === videoOutput { recorder?.noteDroppedVideoFrame() }
+    }
+
     func photoOutput(
         _ output: AVCapturePhotoOutput,
         didFinishProcessingPhoto photo: AVCapturePhoto,
@@ -323,18 +332,21 @@ final class CaptureEngine: NSObject, ObservableObject,
     ) {
         guard error == nil, let data = photo.fileDataRepresentation(),
               let renderer else {
+            captureQueue.async { self.photoProfile = nil }
             updateStatus("STILL CAPTURE FAILED")
             return
         }
-        let profile = photoProfile ?? activeProfile
-        let gain = photoGain
-        photoProfile = nil
-        photoQueue.async {
-            guard let jpeg = renderer.processStill(data, profile: profile, gain: gain) else {
-                self.updateStatus("STILL PROCESSING FAILED")
-                return
+        captureQueue.async {
+            let profile = self.photoProfile ?? self.activeProfile
+            let gain = self.photoGain
+            self.photoProfile = nil
+            self.photoQueue.async {
+                guard let jpeg = renderer.processStill(data, profile: profile, gain: gain) else {
+                    self.updateStatus("STILL PROCESSING FAILED")
+                    return
+                }
+                self.savePhoto(jpeg)
             }
-            self.savePhoto(jpeg)
         }
     }
 

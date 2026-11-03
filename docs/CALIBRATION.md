@@ -33,8 +33,7 @@ Interlaced source simulation weaves alternating lines into progressive H.264;
 it is not a flagged interlaced DV stream and the preview displays the progressive source instants at up to 50/s,
 not deinterlaced fields from a DV bitstream. 50 Hz capture depends on the active format;
 a 25p fallback is indicated. 15/20/25p are target sampling rates: if unsupported
-by the input format, sampling from 30 fps produces uneven frame intervals. Frames
-can also be lost before the delegate if processing is late. Audio may start after
-the first video frame. Encoder overload now fails the recording instead of silently
-saving a file missing encoder-rejected video frames. Device-side tests of cadence,
+by the input format, sampling from 30 fps produces uneven frame intervals. If the capture delegate reports a dropped source video frame, or the encoder rejects
+video or audio, the recording is discarded and an error is shown. Audio may start
+after the first video frame; timing and end duration are not yet verified. Device-side tests of cadence,
 audio sync, shutter, orientation, thermal load and image fidelity are still required.
