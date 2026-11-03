@@ -34,7 +34,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private var fiftyFPSActive = false
     private var pendingField: CMSampleBuffer?
     private var samplingOrigin: CMTime = .invalid
-    private var lastSampleIndex: Int = -1
+    private var cadenceSampler = CadenceSampler()
     private var isFlashEnabled = false
     private var photoProfile: CameraProfile?
     private var photoGain: Float = 1
@@ -146,7 +146,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private func configureFrameRate() {
         pendingField = nil
         samplingOrigin = .invalid
-        lastSampleIndex = -1
+        cadenceSampler.reset()
         guard let camera else { return }
 
         // Use a 30 fps source for progressive modes; select presentation slots below.
@@ -230,7 +230,7 @@ final class CaptureEngine: NSObject, ObservableObject,
                 }
                 self.pendingField = nil
                 self.samplingOrigin = .invalid
-                self.lastSampleIndex = -1
+                self.cadenceSampler.reset()
                 self.recorder = writer
                 let started = Date()
                 DispatchQueue.main.async {
@@ -306,9 +306,7 @@ final class CaptureEngine: NSObject, ObservableObject,
 
         if !samplingOrigin.isValid { samplingOrigin = time }
         let elapsed = max(0, CMTimeGetSeconds(time - samplingOrigin))
-        let index = Int(elapsed * Double(profile.videoFPS) + 0.001)
-        if index <= lastSampleIndex { return }
-        lastSampleIndex = index
+        guard cadenceSampler.accept(elapsed: elapsed, fps: profile.videoFPS) else { return }
         guard let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
               let frame = renderer.render(first: current, second: nil, output: target,
                                           profile: profile, time: time, gain: gain) else { return }
