@@ -429,7 +429,7 @@ struct CameraScreen: View {
                         .foregroundStyle(ArchiveStyle.chalk)
                     Text("Each historical profile changes optics, noise, color and capture cadence. The live preview is processed using Metal; photographs are exported as JPEG, videos as H.264/AAC MP4.")
                     Text("IMPORTANT: this is a physical-model prototype, not a measured replica. The coefficients have not yet been fitted to real 2000s camera reference captures. The iPhone flash, imaging pipeline and microphone remain limitations.")
-                    Text("PAL 50i is simulated from two actual camera instants only when 50fps capture is supported. Otherwise the display says progressive fallback. It does not encode the original DV25 tape bitstream.")
+                    Text("PAL 50i uses two camera instants when 50fps capture is supported. The live preview shows the individual source instants; the recorded H.264 weaves them into progressive frames. Otherwise 25p fallback is shown. This is not DV25.")
                     Text("Everything is captured locally. Saving requires Photos add-only access.")
                 }
                 .font(.system(size: 14))

@@ -37,6 +37,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private var lastSampleIndex: Int = -1
     private var isFlashEnabled = false
     private var photoProfile: CameraProfile?
+    private var photoGain: Float = 1
 
     override init() {
         renderer = RenderEngine()
@@ -211,6 +212,7 @@ final class CaptureEngine: NSObject, ObservableObject,
                 settings.flashMode = self.isFlashEnabled ? .on : .off
             }
             self.photoProfile = self.activeProfile
+            self.photoGain = self.camera.map { Float($0.iso / max($0.activeFormat.minISO, 1)) } ?? 1
             self.photoOutput.capturePhoto(with: settings, delegate: self)
             self.updateStatus("EXPOSING FRAME")
         }
@@ -274,36 +276,42 @@ final class CaptureEngine: NSObject, ObservableObject,
               let current = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 
-        let first: CVPixelBuffer
-        let second: CVPixelBuffer?
-        if activeProfile.prefersTemporalFields && fiftyFPSActive {
+        let profile = activeProfile
+        let gain = camera.map { Float($0.iso / max($0.activeFormat.minISO, 1)) } ?? 1
+
+        if profile.prefersTemporalFields && fiftyFPSActive {
+            // Display each source instant separately. The recorder receives paired
+            // instants woven into alternating lines; its H.264 is still progressive.
+            if let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
+               let live = renderer.render(first: current, second: nil, output: target,
+                                          profile: profile, time: time, gain: gain) {
+                preview.publish(live)
+            }
+            guard recorder != nil else {
+                pendingField = nil
+                return
+            }
             guard let previous = pendingField else {
                 pendingField = sampleBuffer
                 return
             }
             pendingField = nil
-            guard let oldImage = CMSampleBufferGetImageBuffer(previous) else { return }
-            first = oldImage
-            second = current
-        } else {
-            if !samplingOrigin.isValid { samplingOrigin = time }
-            // Quantize to presentation slots so 30fps input can yield ~25fps,
-            // rather than accidentally dropping every other frame (~15fps).
-            let elapsed = max(0, CMTimeGetSeconds(time - samplingOrigin))
-            let index = Int(elapsed * Double(activeProfile.videoFPS) + 0.001)
-            if index <= lastSampleIndex { return }
-            lastSampleIndex = index
-            first = current
-            second = nil
+            guard let oldImage = CMSampleBufferGetImageBuffer(previous),
+                  let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
+                  let woven = renderer.render(first: oldImage, second: current, output: target,
+                                              profile: profile, time: time, gain: gain) else { return }
+            recorder?.appendVideo(woven.pixelBuffer, at: CMSampleBufferGetPresentationTimeStamp(previous))
+            return
         }
 
-        let profile = activeProfile
-        guard let target = renderer.makePixelBuffer(
-            width: profile.videoWidth, height: profile.videoHeight
-        ), let frame = renderer.render(
-            first: first, second: second, output: target,
-            profile: profile, time: time
-        ) else { return }
+        if !samplingOrigin.isValid { samplingOrigin = time }
+        let elapsed = max(0, CMTimeGetSeconds(time - samplingOrigin))
+        let index = Int(elapsed * Double(profile.videoFPS) + 0.001)
+        if index <= lastSampleIndex { return }
+        lastSampleIndex = index
+        guard let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
+              let frame = renderer.render(first: current, second: nil, output: target,
+                                          profile: profile, time: time, gain: gain) else { return }
         preview.publish(frame)
         recorder?.appendVideo(frame.pixelBuffer, at: time)
     }
@@ -319,9 +327,10 @@ final class CaptureEngine: NSObject, ObservableObject,
             return
         }
         let profile = photoProfile ?? activeProfile
+        let gain = photoGain
         photoProfile = nil
         photoQueue.async {
-            guard let jpeg = renderer.processStill(data, profile: profile) else {
+            guard let jpeg = renderer.processStill(data, profile: profile, gain: gain) else {
                 self.updateStatus("STILL PROCESSING FAILED")
                 return
             }

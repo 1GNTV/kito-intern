@@ -16,7 +16,7 @@ struct MetalPreview: UIViewRepresentable {
         view.framebufferOnly = true
         view.isPaused = false
         view.enableSetNeedsDisplay = false
-        view.preferredFramesPerSecond = 30
+        view.preferredFramesPerSecond = 60
         view.delegate = context.coordinator
         return view
     }

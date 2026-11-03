@@ -26,12 +26,12 @@ Record coefficients, uncertainty, camera model, sample count and iPhone model.
 
 ## Current limitations
 
-No reference media has been measured. All existing optical, tone, colour and
-noise coefficients are uncalibrated. iPhone ISP processing cannot be undone.
+No reference media has been measured. All optical, tone, colour and noise coefficients are uncalibrated. ISO-derived
+gain controls the synthetic noise and is only an approximation, not sensor noise. iPhone ISP processing cannot be undone.
 H.264/AAC is not DV or Motion JPEG; dimensions are square-pixel portrait outputs.
 Interlaced source simulation weaves alternating lines into progressive H.264;
-it is not a flagged interlaced DV stream and the current preview is 25 frames/s,
-not a 50-field deinterlaced display. 50 Hz capture depends on the active format;
+it is not a flagged interlaced DV stream and the preview displays the progressive source instants at up to 50/s,
+not deinterlaced fields from a DV bitstream. 50 Hz capture depends on the active format;
 a 25p fallback is indicated. 15/20/25p are target sampling rates: if unsupported
 by the input format, sampling from 30 fps produces uneven frame intervals. Frames
 can also be lost before the delegate if processing is late. Audio may start after

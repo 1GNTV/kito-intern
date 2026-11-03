@@ -14,7 +14,8 @@ struct FilterUniforms {
     float timeSeconds;
     float seed;
     uint useTemporalFields;
-    uint reserved;
+    uint family;
+    float sensorGain;
 };
 
 float hash21(float2 p) {
@@ -67,7 +68,12 @@ kernel void retroKernel(
        (secondField ? second.sample(s, uv - dy).rgb : first.sample(s, uv - dy).rgb)
     ) * 0.25;
 
+    // Compacts often apply local edge enhancement; camcorders retain softer detail.
+    float3 detail = rgb - neighbors;
     rgb = mix(rgb, neighbors, clamp(softness * 0.48, 0.0, 0.45));
+    if (p.family == 0u) {
+        rgb += clamp(detail, -0.12, 0.12) * 0.36;
+    }
 
     // Modest off-axis channel misregistration, correlated with distance to center.
     float2 radial = (screenUV - 0.5) * step * p.chromaMisregistration * 8.0;
@@ -76,6 +82,10 @@ kernel void retroKernel(
 
     rgb = max(rgb, 0.0);
     rgb = (rgb - 0.5) * p.contrast + 0.5;
+    // Experimental highlight knee. It cannot recover already clipped iPhone highlights.
+    float knee = p.family == 0u ? 0.82 : 0.74;
+    float3 above = max(rgb - knee, 0.0);
+    rgb = min(rgb, knee) + above / (1.0 + above * (p.family == 0u ? 1.3 : 2.1));
     float luma = dot(rgb, float3(0.2126, 0.7152, 0.0722));
     rgb = mix(float3(luma), rgb, p.saturation);
     rgb.r += p.warmth;
@@ -92,11 +102,15 @@ kernel void retroKernel(
     // Post-processing approximation: noise rises in shadows, and chroma
     // noise is partially decorrelated. We cannot reconstruct pre-ISP electrons.
     float dark = 1.0 - clamp(luma, 0.0, 1.0);
-    float noise = p.sensorNoise * (0.38 + dark * 1.50);
+    float amplification = sqrt(clamp(p.sensorGain, 1.0, 16.0));
+    float noise = p.sensorNoise * (0.24 + dark * 1.10) * amplification;
     float2 noiseSeed = float2(gid) + p.seed + floor(p.timeSeconds * 51.0);
     float lumNoise = (hash21(noiseSeed) - 0.5) * noise;
-    float chromaR = (hash21(noiseSeed + 41.2) - 0.5) * noise * 0.72;
-    float chromaB = (hash21(noiseSeed + 89.1) - 0.5) * noise * 0.91;
+    float chromaScale = p.family == 0u ? 0.55 : 0.9;
+    // Low-frequency chroma noise approximates the reduced colour resolution.
+    float2 chromaSeed = floor(float2(gid) / (p.family == 0u ? 2.0 : 4.0)) + p.seed;
+    float chromaR = (hash21(chromaSeed + 41.2) - 0.5) * noise * chromaScale;
+    float chromaB = (hash21(chromaSeed + 89.1) - 0.5) * noise * chromaScale;
     rgb += float3(lumNoise + chromaR, lumNoise, lumNoise + chromaB);
 
     float falloff = 1.0 - p.cornerFalloff * smoothstep(0.15, 0.90, edge);
