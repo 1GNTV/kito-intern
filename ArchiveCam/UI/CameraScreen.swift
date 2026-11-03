@@ -329,7 +329,8 @@ struct CameraScreen: View {
     private var deviceSheet: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ForEach(Array(CameraProfile.all.enumerated()), id: \.element.id) { index, device in
+                ForEach(CameraProfile.all.indices, id: \.self) { index in
+                    let device = CameraProfile.all[index]
                     Button {
                         profile = device
                         zoom = 1
