@@ -21,8 +21,8 @@ struct CameraProfile: Identifiable, Equatable {
     let photoHeight: Int
     let videoWidth: Int
     let videoHeight: Int
-    let videoFPS: Int
-    let prefersTemporalFields: Bool
+    var videoFPS: Int
+    var prefersTemporalFields: Bool
     let jpegQuality: CGFloat
 
     // Experimental coefficients, intentionally NOT represented as measured calibration.
@@ -43,7 +43,7 @@ struct CameraProfile: Identifiable, Equatable {
         descriptor: "5 MP CCD-era compact / experimental optical and JPEG response",
         photoWidth: 1944, photoHeight: 2592,
         videoWidth: 480, videoHeight: 640,
-        videoFPS: 30,
+        videoFPS: 15,
         prefersTemporalFields: false,
         jpegQuality: 0.77,
         saturation: 1.06, contrast: 1.09, warmth: 0.015,

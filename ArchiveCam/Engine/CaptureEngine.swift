@@ -36,6 +36,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private var samplingOrigin: CMTime = .invalid
     private var lastSampleIndex: Int = -1
     private var isFlashEnabled = false
+    private var photoProfile: CameraProfile?
 
     override init() {
         renderer = RenderEngine()
@@ -147,6 +148,8 @@ final class CaptureEngine: NSObject, ObservableObject,
         lastSampleIndex = -1
         guard let camera else { return }
 
+        // Use a 30 fps source for progressive modes; select presentation slots below.
+        // 20p and 25p may be uneven when the sensor cannot deliver the requested rate.
         let desired = activeProfile.prefersTemporalFields ? 50.0 : Double(activeProfile.videoFPS)
         let supported = camera.activeFormat.videoSupportedFrameRateRanges.contains {
             $0.minFrameRate <= desired && $0.maxFrameRate >= desired
@@ -207,6 +210,7 @@ final class CaptureEngine: NSObject, ObservableObject,
             if self.camera?.hasFlash == true {
                 settings.flashMode = self.isFlashEnabled ? .on : .off
             }
+            self.photoProfile = self.activeProfile
             self.photoOutput.capturePhoto(with: settings, delegate: self)
             self.updateStatus("EXPOSING FRAME")
         }
@@ -222,6 +226,9 @@ final class CaptureEngine: NSObject, ObservableObject,
                     self.updateStatus("ENCODER UNAVAILABLE")
                     return
                 }
+                self.pendingField = nil
+                self.samplingOrigin = .invalid
+                self.lastSampleIndex = -1
                 self.recorder = writer
                 let started = Date()
                 DispatchQueue.main.async {
@@ -311,7 +318,8 @@ final class CaptureEngine: NSObject, ObservableObject,
             updateStatus("STILL CAPTURE FAILED")
             return
         }
-        let profile = activeProfile
+        let profile = photoProfile ?? activeProfile
+        photoProfile = nil
         photoQueue.async {
             guard let jpeg = renderer.processStill(data, profile: profile) else {
                 self.updateStatus("STILL PROCESSING FAILED")

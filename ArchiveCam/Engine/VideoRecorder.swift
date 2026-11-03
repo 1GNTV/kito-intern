@@ -11,6 +11,7 @@ final class VideoRecorder {
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private var firstTime: CMTime?
     private(set) var appendedFrames = 0
+    private var videoBackpressure = false
 
     init?(profile: CameraProfile, microphone: Bool) {
         let directory = FileManager.default.temporaryDirectory
@@ -73,11 +74,15 @@ final class VideoRecorder {
             writer.startSession(atSourceTime: time)
             firstTime = time
         }
-        guard writer.status == .writing, videoInput.isReadyForMoreMediaData else {
+        guard writer.status == .writing else { return }
+        guard videoInput.isReadyForMoreMediaData else {
+            videoBackpressure = true
             return
         }
         if adaptor.append(pixelBuffer, withPresentationTime: time) {
             appendedFrames += 1
+        } else {
+            videoBackpressure = true
         }
     }
 
@@ -91,6 +96,15 @@ final class VideoRecorder {
     }
 
     func finish(_ completion: @escaping (Result<URL, Error>) -> Void) {
+        guard !videoBackpressure else {
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: url)
+            completion(.failure(NSError(
+                domain: "ArchiveCam", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Encoder could not keep up; recording discarded."]
+            )))
+            return
+        }
         guard firstTime != nil else {
             completion(.failure(NSError(
                 domain: "ArchiveCam", code: 1,

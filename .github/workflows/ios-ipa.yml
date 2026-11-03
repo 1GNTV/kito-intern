@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Check cadence slot arithmetic
+        run: python3 -m unittest discover -s tests -v
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project

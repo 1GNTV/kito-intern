@@ -179,7 +179,7 @@ struct CameraScreen: View {
                     Text("AUTO / AF")
                     Spacer()
                     if profile.prefersTemporalFields && mode == .video {
-                        Text(camera.hasFiftyFPS ? "50i SOURCE" : "25p FALLBACK")
+                        Text(camera.hasFiftyFPS ? "50 FIELDS/S SOURCE" : "25P FALLBACK")
                     } else {
                         Text("4:3")
                     }
@@ -218,6 +218,38 @@ struct CameraScreen: View {
                     .buttonStyle(.plain)
                     .disabled(camera.isRecording)
                 }
+            }
+
+            if mode == .video {
+                Menu {
+                    ForEach([15, 20, 25], id: \.self) { fps in
+                        Button("\(fps)P") {
+                            profile.videoFPS = fps
+                            profile.prefersTemporalFields = false
+                            camera.select(profile)
+                        }
+                    }
+                    if profile.family == .camcorder {
+                        Button("PAL 50i (50 fields/s)") {
+                            profile.videoFPS = 25
+                            profile.prefersTemporalFields = true
+                            camera.select(profile)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("CADENCE")
+                        Spacer()
+                        Text(profile.prefersTemporalFields
+                             ? (camera.hasFiftyFPS ? "PAL 50i SOURCE" : "25P FALLBACK")
+                             : "\(profile.videoFPS)P")
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(ArchiveStyle.chalk)
+                }
+                .disabled(camera.isRecording)
+                .accessibilityLabel("Video cadence")
             }
 
             HStack(spacing: 16) {
