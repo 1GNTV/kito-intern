@@ -33,7 +33,8 @@ final class CaptureEngine: NSObject, ObservableObject,
     private var microphoneGranted = false
     private var fiftyFPSActive = false
     private var pendingField: CMSampleBuffer?
-    private var lastFrameTime: CMTime = .invalid
+    private var samplingOrigin: CMTime = .invalid
+    private var lastSampleIndex: Int = -1
     private var isFlashEnabled = false
 
     override init() {
@@ -142,7 +143,8 @@ final class CaptureEngine: NSObject, ObservableObject,
 
     private func configureFrameRate() {
         pendingField = nil
-        lastFrameTime = .invalid
+        samplingOrigin = .invalid
+        lastSampleIndex = -1
         guard let camera else { return }
 
         let desired = activeProfile.prefersTemporalFields ? 50.0 : Double(activeProfile.videoFPS)
@@ -277,16 +279,16 @@ final class CaptureEngine: NSObject, ObservableObject,
             first = oldImage
             second = current
         } else {
-            if lastFrameTime.isValid {
-                let delta = CMTimeGetSeconds(time - lastFrameTime)
-                if delta >= 0 && delta < (1.0 / Double(activeProfile.videoFPS)) * 0.95 {
-                    return
-                }
-            }
+            if !samplingOrigin.isValid { samplingOrigin = time }
+            // Quantize to presentation slots so 30fps input can yield ~25fps,
+            // rather than accidentally dropping every other frame (~15fps).
+            let elapsed = max(0, CMTimeGetSeconds(time - samplingOrigin))
+            let index = Int(elapsed * Double(activeProfile.videoFPS) + 0.001)
+            if index <= lastSampleIndex { return }
+            lastSampleIndex = index
             first = current
             second = nil
         }
-        lastFrameTime = time
 
         let profile = activeProfile
         guard let target = renderer.makePixelBuffer(
