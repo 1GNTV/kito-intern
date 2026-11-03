@@ -12,7 +12,7 @@ private enum ArchiveStyle {
 
 struct CameraScreen: View {
     @StateObject private var camera = CaptureEngine()
-    @State private var profile = CameraProfile.compact04
+    @State private var profile = CameraProfile.compact02
     @State private var mode: CaptureMode = .photo
     @State private var flash = false
     @State private var zoom: Double = 1.0
@@ -34,6 +34,7 @@ struct CameraScreen: View {
                 viewfinder
                     .frame(height: finderHeight)
                     .accessibilityLabel("Simulated live camera preview")
+                    .onTapGesture { camera.refocus() }
 
                 Spacer(minLength: 13)
 
@@ -68,7 +69,7 @@ struct CameraScreen: View {
                     .foregroundStyle(ArchiveStyle.chalk)
             }
             Spacer()
-            Text("BETA  01")
+            Text("ENGINE  03")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .tracking(0.8)
                 .foregroundStyle(ArchiveStyle.muted)
@@ -176,7 +177,7 @@ struct CameraScreen: View {
                 Spacer()
 
                 HStack {
-                    Text("AUTO / AF")
+                    Text("CCD / AUTO AF")
                     Spacer()
                     if profile.prefersTemporalFields && mode == .video {
                         Text(camera.hasFiftyFPS ? "50 FIELDS/S SOURCE" : "25P FALLBACK")

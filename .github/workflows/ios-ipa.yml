@@ -17,6 +17,12 @@ jobs:
         run: |
           swiftc ArchiveCam/Engine/CadenceSampler.swift tests/CadenceChecks.swift -o /tmp/archivecam-cadence-tests
           /tmp/archivecam-cadence-tests
+      - name: Compile and exercise production Metal image pipeline
+        run: |
+          xcrun -sdk macosx metal -c ArchiveCam/Engine/LegacyCamera.metal -o /tmp/archivecam-test.air
+          xcrun -sdk macosx metallib /tmp/archivecam-test.air -o /tmp/archivecam-test.metallib
+          swiftc ArchiveCam/Models/CameraProfile.swift ArchiveCam/Models/ImagingRecipe.swift tests/RenderChecks.swift -o /tmp/archivecam-render-tests
+          /tmp/archivecam-render-tests
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project

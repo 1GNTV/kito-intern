@@ -28,7 +28,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private let photoQueue = DispatchQueue(label: "cam.archive.stills", qos: .userInitiated)
     private var camera: AVCaptureDevice?
     private var configured = false
-    private var activeProfile = CameraProfile.compact04
+    private var activeProfile = CameraProfile.compact02
     private var recorder: VideoRecorder?
     private var microphoneGranted = false
     private var fiftyFPSActive = false
@@ -116,6 +116,7 @@ final class CaptureEngine: NSObject, ObservableObject,
             if let connection = videoOutput.connection(with: .video),
                connection.isVideoOrientationSupported {
                 connection.videoOrientation = .portrait
+                if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
             }
         } else {
             updateStatus("VIDEO OUTPUT UNAVAILABLE")
@@ -134,7 +135,7 @@ final class CaptureEngine: NSObject, ObservableObject,
             return
         }
         session.addOutput(photoOutput)
-        photoOutput.maxPhotoQualityPrioritization = .quality
+        photoOutput.maxPhotoQualityPrioritization = .balanced
         if let connection = photoOutput.connection(with: .video),
            connection.isVideoOrientationSupported {
             connection.videoOrientation = .portrait
@@ -166,6 +167,9 @@ final class CaptureEngine: NSObject, ObservableObject,
                 let duration = CMTime(value: 1, timescale: CMTimeScale(Int32(rate)))
                 camera.activeVideoMinFrameDuration = duration
                 camera.activeVideoMaxFrameDuration = duration
+                camera.automaticallyAdjustsVideoHDREnabled = false
+                if camera.activeFormat.isVideoHDRSupported { camera.isVideoHDREnabled = false }
+                if camera.isFocusModeSupported(.autoFocus) { camera.focusMode = .autoFocus }
                 camera.unlockForConfiguration()
             } catch {
                 fiftyFPSActive = false
@@ -199,6 +203,21 @@ final class CaptureEngine: NSObject, ObservableObject,
         }
     }
 
+    func refocus() {
+        captureQueue.async {
+            guard let device = self.camera else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusPointOfInterestSupported {
+                    device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                }
+                if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
+                device.unlockForConfiguration()
+                self.updateStatus("FOCUSING")
+            } catch { self.updateStatus("FOCUS UNAVAILABLE") }
+        }
+    }
+
     func setFlash(_ enabled: Bool) {
         captureQueue.async { self.isFlashEnabled = enabled }
     }
@@ -207,7 +226,7 @@ final class CaptureEngine: NSObject, ObservableObject,
         captureQueue.async {
             guard self.configured, self.recorder == nil, self.photoProfile == nil else { return }
             let settings = AVCapturePhotoSettings()
-            settings.photoQualityPrioritization = .quality
+            settings.photoQualityPrioritization = .balanced
             if self.camera?.hasFlash == true {
                 settings.flashMode = self.isFlashEnabled ? .on : .off
             }
