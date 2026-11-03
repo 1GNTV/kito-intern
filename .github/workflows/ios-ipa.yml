@@ -13,6 +13,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Test production cadence sampler
+        run: |
+          swiftc ArchiveCam/Engine/CadenceSampler.swift tests/CadenceChecks.swift -o /tmp/archivecam-cadence-tests
+          /tmp/archivecam-cadence-tests
+      - name: Compile and exercise production Metal image pipeline
+        run: |
+          xcrun -sdk macosx metal -c ArchiveCam/Engine/LegacyCamera.metal -o /tmp/archivecam-test.air
+          xcrun -sdk macosx metallib /tmp/archivecam-test.air -o /tmp/archivecam-test.metallib
+          swiftc ArchiveCam/Models/CameraProfile.swift ArchiveCam/Models/ImagingRecipe.swift tests/RenderChecks.swift -o /tmp/archivecam-render-tests
+          /tmp/archivecam-render-tests
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -36,6 +46,11 @@ jobs:
           cp -R "DerivedData/Build/Products/Release-iphoneos/ArchiveCam.app" Payload/
           zip -qry ArchiveCam-unsigned.ipa Payload
           unzip -t ArchiveCam-unsigned.ipa
+          test -s Payload/ArchiveCam.app/default.metallib
+          test -x Payload/ArchiveCam.app/ArchiveCam
+          file Payload/ArchiveCam.app/ArchiveCam | grep -q arm64
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Payload/ArchiveCam.app/Info.plist
+          shasum -a 256 ArchiveCam-unsigned.ipa
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:

@@ -29,36 +29,6 @@ final class PreviewStore {
     }
 }
 
-struct FilterParameters {
-    var saturation: Float
-    var contrast: Float
-    var warmth: Float
-    var sensorNoise: Float
-    var opticalSoftness: Float
-    var highlightBloom: Float
-    var chromaMisregistration: Float
-    var cornerFalloff: Float
-    var timeSeconds: Float
-    var seed: Float
-    var useTemporalFields: UInt32
-    var reserved: UInt32 = 0
-
-    init(profile: CameraProfile, time: CMTime, fields: Bool) {
-        saturation = profile.saturation
-        contrast = profile.contrast
-        warmth = profile.warmth
-        sensorNoise = profile.sensorNoise
-        opticalSoftness = profile.opticalSoftness
-        highlightBloom = profile.highlightBloom
-        chromaMisregistration = profile.chromaMisregistration
-        cornerFalloff = profile.cornerFalloff
-        let seconds = CMTimeGetSeconds(time)
-        timeSeconds = seconds.isFinite ? Float(seconds.truncatingRemainder(dividingBy: 10_000)) : 0
-        seed = Float.random(in: 0...1024)
-        useTemporalFields = fields ? 1 : 0
-    }
-}
-
 final class RenderEngine {
     let device: MTLDevice
     let queue: MTLCommandQueue
@@ -89,7 +59,7 @@ final class RenderEngine {
         self.queue = queue
         self.screenPipeline = screen
         self.filterPipeline = compute
-        self.ciContext = CIContext(mtlDevice: gpu)
+        self.ciContext = CIContext(mtlDevice: gpu, options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
 
         var cache: CVMetalTextureCache?
         let result = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, gpu, nil, &cache)
@@ -129,7 +99,8 @@ final class RenderEngine {
         second: CVPixelBuffer?,
         output: CVPixelBuffer,
         profile: CameraProfile,
-        time: CMTime
+        time: CMTime,
+        gain: Float = 1
     ) -> SimulatedFrame? {
         guard let inputRef = texture(for: first),
               let firstTexture = CVMetalTextureGetTexture(inputRef),
@@ -138,17 +109,21 @@ final class RenderEngine {
         let secondRef = second.flatMap { texture(for: $0) }
         let secondTexture = secondRef.flatMap { CVMetalTextureGetTexture($0) } ?? firstTexture
 
-        var uniforms = FilterParameters(
-            profile: profile, time: time,
-            fields: second != nil && profile.prefersTemporalFields
-        )
+        var uniforms = profile.recipe
+        uniforms.sensor.x = Float(CVPixelBufferGetWidth(output))
+        uniforms.sensor.y = Float(CVPixelBufferGetHeight(output))
+        let seconds = CMTimeGetSeconds(time)
+        uniforms.timing = SIMD4(
+            seconds.isFinite ? Float(Int(seconds * 1000) % 65536) : 0,
+            min(max(gain, 1), 16),
+            second != nil && profile.prefersTemporalFields ? 1 : 0, 0)
         guard let command = queue.makeCommandBuffer(),
               let encoder = command.makeComputeCommandEncoder() else { return nil }
         encoder.setComputePipelineState(filterPipeline)
         encoder.setTexture(firstTexture, index: 0)
         encoder.setTexture(secondTexture, index: 1)
         encoder.setTexture(outputTexture, index: 2)
-        encoder.setBytes(&uniforms, length: MemoryLayout<FilterParameters>.stride, index: 0)
+        encoder.setBytes(&uniforms, length: MemoryLayout<ImagingRecipe>.stride, index: 0)
         let w = filterPipeline.threadExecutionWidth
         let h = max(1, filterPipeline.maxTotalThreadsPerThreadgroup / w)
         encoder.dispatchThreads(
@@ -162,7 +137,7 @@ final class RenderEngine {
         return SimulatedFrame(pixelBuffer: output, metalTexture: outputRef)
     }
 
-    func processStill(_ data: Data, profile: CameraProfile) -> Data? {
+    func processStill(_ data: Data, profile: CameraProfile, gain: Float = 1) -> Data? {
         guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
             return nil
         }
@@ -184,7 +159,7 @@ final class RenderEngine {
         )
         guard let result = render(
             first: source, second: nil, output: destination,
-            profile: profile, time: .zero
+            profile: profile, time: .zero, gain: gain
         ) else { return nil }
         let outputImage = CIImage(cvPixelBuffer: result.pixelBuffer)
         guard let cg = ciContext.createCGImage(

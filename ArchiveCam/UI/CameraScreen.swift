@@ -12,7 +12,7 @@ private enum ArchiveStyle {
 
 struct CameraScreen: View {
     @StateObject private var camera = CaptureEngine()
-    @State private var profile = CameraProfile.compact04
+    @State private var profile = CameraProfile.compact02
     @State private var mode: CaptureMode = .photo
     @State private var flash = false
     @State private var zoom: Double = 1.0
@@ -34,6 +34,7 @@ struct CameraScreen: View {
                 viewfinder
                     .frame(height: finderHeight)
                     .accessibilityLabel("Simulated live camera preview")
+                    .onTapGesture { camera.refocus() }
 
                 Spacer(minLength: 13)
 
@@ -68,7 +69,7 @@ struct CameraScreen: View {
                     .foregroundStyle(ArchiveStyle.chalk)
             }
             Spacer()
-            Text("BETA  01")
+            Text("ENGINE  03")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .tracking(0.8)
                 .foregroundStyle(ArchiveStyle.muted)
@@ -176,10 +177,10 @@ struct CameraScreen: View {
                 Spacer()
 
                 HStack {
-                    Text("AUTO / AF")
+                    Text("CCD / AUTO AF")
                     Spacer()
                     if profile.prefersTemporalFields && mode == .video {
-                        Text(camera.hasFiftyFPS ? "50i SOURCE" : "25p FALLBACK")
+                        Text(camera.hasFiftyFPS ? "50 FIELDS/S SOURCE" : "25P FALLBACK")
                     } else {
                         Text("4:3")
                     }
@@ -218,6 +219,38 @@ struct CameraScreen: View {
                     .buttonStyle(.plain)
                     .disabled(camera.isRecording)
                 }
+            }
+
+            if mode == .video {
+                Menu {
+                    ForEach([15, 20, 25], id: \.self) { fps in
+                        Button("\(fps)P") {
+                            profile.videoFPS = fps
+                            profile.prefersTemporalFields = false
+                            camera.select(profile)
+                        }
+                    }
+                    if profile.family == .camcorder {
+                        Button("PAL 50i (50 fields/s)") {
+                            profile.videoFPS = 25
+                            profile.prefersTemporalFields = true
+                            camera.select(profile)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("CADENCE")
+                        Spacer()
+                        Text(profile.prefersTemporalFields
+                             ? (camera.hasFiftyFPS ? "PAL 50i SOURCE" : "25P FALLBACK")
+                             : "\(profile.videoFPS)P")
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(ArchiveStyle.chalk)
+                }
+                .disabled(camera.isRecording)
+                .accessibilityLabel("Video cadence")
             }
 
             HStack(spacing: 16) {
@@ -397,7 +430,7 @@ struct CameraScreen: View {
                         .foregroundStyle(ArchiveStyle.chalk)
                     Text("Each historical profile changes optics, noise, color and capture cadence. The live preview is processed using Metal; photographs are exported as JPEG, videos as H.264/AAC MP4.")
                     Text("IMPORTANT: this is a physical-model prototype, not a measured replica. The coefficients have not yet been fitted to real 2000s camera reference captures. The iPhone flash, imaging pipeline and microphone remain limitations.")
-                    Text("PAL 50i is simulated from two actual camera instants only when 50fps capture is supported. Otherwise the display says progressive fallback. It does not encode the original DV25 tape bitstream.")
+                    Text("PAL 50i uses two camera instants when 50fps capture is supported. The live preview shows the individual source instants; the recorded H.264 weaves them into progressive frames. Otherwise 25p fallback is shown. This is not DV25.")
                     Text("Everything is captured locally. Saving requires Photos add-only access.")
                 }
                 .font(.system(size: 14))

@@ -11,6 +11,8 @@ final class VideoRecorder {
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private var firstTime: CMTime?
     private(set) var appendedFrames = 0
+    private var videoBackpressure = false
+    private var audioBackpressure = false
 
     init?(profile: CameraProfile, microphone: Bool) {
         let directory = FileManager.default.temporaryDirectory
@@ -19,7 +21,7 @@ final class VideoRecorder {
         guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else {
             return nil
         }
-        let bitRate = profile.family == .camcorder ? 2_400_000 : 2_800_000
+        let bitRate = profile.family == .camcorder ? 5_000_000 : (profile.id == "compact02" ? 420_000 : 1_800_000)
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: profile.videoWidth,
@@ -27,7 +29,7 @@ final class VideoRecorder {
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: bitRate,
                 AVVideoExpectedSourceFrameRateKey: profile.videoFPS,
-                AVVideoMaxKeyFrameIntervalKey: profile.videoFPS
+                AVVideoMaxKeyFrameIntervalKey: profile.family == .compact ? 1 : profile.videoFPS
             ]
         ]
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
@@ -73,11 +75,15 @@ final class VideoRecorder {
             writer.startSession(atSourceTime: time)
             firstTime = time
         }
-        guard writer.status == .writing, videoInput.isReadyForMoreMediaData else {
+        guard writer.status == .writing else { return }
+        guard videoInput.isReadyForMoreMediaData else {
+            videoBackpressure = true
             return
         }
         if adaptor.append(pixelBuffer, withPresentationTime: time) {
             appendedFrames += 1
+        } else {
+            videoBackpressure = true
         }
     }
 
@@ -85,12 +91,25 @@ final class VideoRecorder {
         guard let audioInput, let firstTime,
               CMSampleBufferDataIsReady(sampleBuffer),
               CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= firstTime,
-              writer.status == .writing,
-              audioInput.isReadyForMoreMediaData else { return }
-        _ = audioInput.append(sampleBuffer)
+              writer.status == .writing else { return }
+        guard audioInput.isReadyForMoreMediaData, audioInput.append(sampleBuffer) else {
+            audioBackpressure = true
+            return
+        }
     }
 
+    func noteDroppedVideoFrame() { videoBackpressure = true }
+
     func finish(_ completion: @escaping (Result<URL, Error>) -> Void) {
+        guard !videoBackpressure && !audioBackpressure else {
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: url)
+            completion(.failure(NSError(
+                domain: "ArchiveCam", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Capture or encoder could not keep up; recording discarded."]
+            )))
+            return
+        }
         guard firstTime != nil else {
             completion(.failure(NSError(
                 domain: "ArchiveCam", code: 1,

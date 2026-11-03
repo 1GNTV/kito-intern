@@ -28,14 +28,16 @@ final class CaptureEngine: NSObject, ObservableObject,
     private let photoQueue = DispatchQueue(label: "cam.archive.stills", qos: .userInitiated)
     private var camera: AVCaptureDevice?
     private var configured = false
-    private var activeProfile = CameraProfile.compact04
+    private var activeProfile = CameraProfile.compact02
     private var recorder: VideoRecorder?
     private var microphoneGranted = false
     private var fiftyFPSActive = false
     private var pendingField: CMSampleBuffer?
     private var samplingOrigin: CMTime = .invalid
-    private var lastSampleIndex: Int = -1
+    private var cadenceSampler = CadenceSampler()
     private var isFlashEnabled = false
+    private var photoProfile: CameraProfile?
+    private var photoGain: Float = 1
 
     override init() {
         renderer = RenderEngine()
@@ -114,6 +116,7 @@ final class CaptureEngine: NSObject, ObservableObject,
             if let connection = videoOutput.connection(with: .video),
                connection.isVideoOrientationSupported {
                 connection.videoOrientation = .portrait
+                if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
             }
         } else {
             updateStatus("VIDEO OUTPUT UNAVAILABLE")
@@ -132,7 +135,7 @@ final class CaptureEngine: NSObject, ObservableObject,
             return
         }
         session.addOutput(photoOutput)
-        photoOutput.maxPhotoQualityPrioritization = .quality
+        photoOutput.maxPhotoQualityPrioritization = .balanced
         if let connection = photoOutput.connection(with: .video),
            connection.isVideoOrientationSupported {
             connection.videoOrientation = .portrait
@@ -144,9 +147,11 @@ final class CaptureEngine: NSObject, ObservableObject,
     private func configureFrameRate() {
         pendingField = nil
         samplingOrigin = .invalid
-        lastSampleIndex = -1
+        cadenceSampler.reset()
         guard let camera else { return }
 
+        // Use a 30 fps source for progressive modes; select presentation slots below.
+        // 20p and 25p may be uneven when the sensor cannot deliver the requested rate.
         let desired = activeProfile.prefersTemporalFields ? 50.0 : Double(activeProfile.videoFPS)
         let supported = camera.activeFormat.videoSupportedFrameRateRanges.contains {
             $0.minFrameRate <= desired && $0.maxFrameRate >= desired
@@ -162,6 +167,9 @@ final class CaptureEngine: NSObject, ObservableObject,
                 let duration = CMTime(value: 1, timescale: CMTimeScale(Int32(rate)))
                 camera.activeVideoMinFrameDuration = duration
                 camera.activeVideoMaxFrameDuration = duration
+                camera.automaticallyAdjustsVideoHDREnabled = false
+                if camera.activeFormat.isVideoHDRSupported { camera.isVideoHDREnabled = false }
+                if camera.isFocusModeSupported(.autoFocus) { camera.focusMode = .autoFocus }
                 camera.unlockForConfiguration()
             } catch {
                 fiftyFPSActive = false
@@ -195,18 +203,35 @@ final class CaptureEngine: NSObject, ObservableObject,
         }
     }
 
+    func refocus() {
+        captureQueue.async {
+            guard let device = self.camera else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusPointOfInterestSupported {
+                    device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                }
+                if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
+                device.unlockForConfiguration()
+                self.updateStatus("FOCUSING")
+            } catch { self.updateStatus("FOCUS UNAVAILABLE") }
+        }
+    }
+
     func setFlash(_ enabled: Bool) {
         captureQueue.async { self.isFlashEnabled = enabled }
     }
 
     func shootPhoto() {
         captureQueue.async {
-            guard self.configured, self.recorder == nil else { return }
+            guard self.configured, self.recorder == nil, self.photoProfile == nil else { return }
             let settings = AVCapturePhotoSettings()
-            settings.photoQualityPrioritization = .quality
+            settings.photoQualityPrioritization = .balanced
             if self.camera?.hasFlash == true {
                 settings.flashMode = self.isFlashEnabled ? .on : .off
             }
+            self.photoProfile = self.activeProfile
+            self.photoGain = self.camera.map { Float($0.iso / max($0.activeFormat.minISO, 1)) } ?? 1
             self.photoOutput.capturePhoto(with: settings, delegate: self)
             self.updateStatus("EXPOSING FRAME")
         }
@@ -222,6 +247,9 @@ final class CaptureEngine: NSObject, ObservableObject,
                     self.updateStatus("ENCODER UNAVAILABLE")
                     return
                 }
+                self.pendingField = nil
+                self.samplingOrigin = .invalid
+                self.cadenceSampler.reset()
                 self.recorder = writer
                 let started = Date()
                 DispatchQueue.main.async {
@@ -267,38 +295,51 @@ final class CaptureEngine: NSObject, ObservableObject,
               let current = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 
-        let first: CVPixelBuffer
-        let second: CVPixelBuffer?
-        if activeProfile.prefersTemporalFields && fiftyFPSActive {
+        let profile = activeProfile
+        let gain = camera.map { Float($0.iso / max($0.activeFormat.minISO, 1)) } ?? 1
+
+        if profile.prefersTemporalFields && fiftyFPSActive {
+            // Display each source instant separately. The recorder receives paired
+            // instants woven into alternating lines; its H.264 is still progressive.
+            if let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
+               let live = renderer.render(first: current, second: nil, output: target,
+                                          profile: profile, time: time, gain: gain) {
+                preview.publish(live)
+            }
+            guard recorder != nil else {
+                pendingField = nil
+                return
+            }
             guard let previous = pendingField else {
                 pendingField = sampleBuffer
                 return
             }
             pendingField = nil
-            guard let oldImage = CMSampleBufferGetImageBuffer(previous) else { return }
-            first = oldImage
-            second = current
-        } else {
-            if !samplingOrigin.isValid { samplingOrigin = time }
-            // Quantize to presentation slots so 30fps input can yield ~25fps,
-            // rather than accidentally dropping every other frame (~15fps).
-            let elapsed = max(0, CMTimeGetSeconds(time - samplingOrigin))
-            let index = Int(elapsed * Double(activeProfile.videoFPS) + 0.001)
-            if index <= lastSampleIndex { return }
-            lastSampleIndex = index
-            first = current
-            second = nil
+            guard let oldImage = CMSampleBufferGetImageBuffer(previous),
+                  let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
+                  let woven = renderer.render(first: oldImage, second: current, output: target,
+                                              profile: profile, time: time, gain: gain) else { return }
+            recorder?.appendVideo(woven.pixelBuffer, at: CMSampleBufferGetPresentationTimeStamp(previous))
+            return
         }
 
-        let profile = activeProfile
-        guard let target = renderer.makePixelBuffer(
-            width: profile.videoWidth, height: profile.videoHeight
-        ), let frame = renderer.render(
-            first: first, second: second, output: target,
-            profile: profile, time: time
-        ) else { return }
+        if !samplingOrigin.isValid { samplingOrigin = time }
+        let elapsed = max(0, CMTimeGetSeconds(time - samplingOrigin))
+        guard cadenceSampler.accept(elapsed: elapsed, fps: profile.videoFPS) else { return }
+        guard let target = renderer.makePixelBuffer(width: profile.videoWidth, height: profile.videoHeight),
+              let frame = renderer.render(first: current, second: nil, output: target,
+                                          profile: profile, time: time, gain: gain) else { return }
         preview.publish(frame)
         recorder?.appendVideo(frame.pixelBuffer, at: time)
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didDrop sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        // The capture output discarded a source frame before it reached our sampler.
+        if output === videoOutput { recorder?.noteDroppedVideoFrame() }
     }
 
     func photoOutput(
@@ -308,16 +349,21 @@ final class CaptureEngine: NSObject, ObservableObject,
     ) {
         guard error == nil, let data = photo.fileDataRepresentation(),
               let renderer else {
+            captureQueue.async { self.photoProfile = nil }
             updateStatus("STILL CAPTURE FAILED")
             return
         }
-        let profile = activeProfile
-        photoQueue.async {
-            guard let jpeg = renderer.processStill(data, profile: profile) else {
-                self.updateStatus("STILL PROCESSING FAILED")
-                return
+        captureQueue.async {
+            let profile = self.photoProfile ?? self.activeProfile
+            let gain = self.photoGain
+            self.photoProfile = nil
+            self.photoQueue.async {
+                guard let jpeg = renderer.processStill(data, profile: profile, gain: gain) else {
+                    self.updateStatus("STILL PROCESSING FAILED")
+                    return
+                }
+                self.savePhoto(jpeg)
             }
-            self.savePhoto(jpeg)
         }
     }
 
