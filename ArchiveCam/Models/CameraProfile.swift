@@ -1,0 +1,71 @@
+import Foundation
+import CoreGraphics
+
+enum CaptureMode: String, CaseIterable {
+    case photo = "PHOTO"
+    case video = "VIDEO"
+}
+
+struct CameraProfile: Identifiable, Equatable {
+    enum Family: String {
+        case compact = "DIGITAL STILL"
+        case camcorder = "DIGITAL VIDEO"
+    }
+
+    let id: String
+    let name: String
+    let era: String
+    let family: Family
+    let descriptor: String
+    let photoWidth: Int
+    let photoHeight: Int
+    let videoWidth: Int
+    let videoHeight: Int
+    let videoFPS: Int
+    let prefersTemporalFields: Bool
+    let jpegQuality: CGFloat
+
+    // Experimental coefficients, intentionally NOT represented as measured calibration.
+    let saturation: Float
+    let contrast: Float
+    let warmth: Float
+    let sensorNoise: Float
+    let opticalSoftness: Float
+    let highlightBloom: Float
+    let chromaMisregistration: Float
+    let cornerFalloff: Float
+
+    static let compact04 = CameraProfile(
+        id: "compact04",
+        name: "COMPACT 04",
+        era: "2004 / CCD",
+        family: .compact,
+        descriptor: "5 MP CCD-era compact / experimental optical and JPEG response",
+        photoWidth: 1944, photoHeight: 2592,
+        videoWidth: 480, videoHeight: 640,
+        videoFPS: 30,
+        prefersTemporalFields: false,
+        jpegQuality: 0.77,
+        saturation: 1.06, contrast: 1.09, warmth: 0.015,
+        sensorNoise: 0.014, opticalSoftness: 0.26,
+        highlightBloom: 0.12, chromaMisregistration: 0.32, cornerFalloff: 0.14
+    )
+
+    static let miniDV03 = CameraProfile(
+        id: "minidv03",
+        name: "MINIDV 03",
+        era: "2003 / PAL",
+        family: .camcorder,
+        descriptor: "PAL 50-field/s sampling when supported / square-pixel 4:3 output",
+        photoWidth: 576, photoHeight: 768,
+        videoWidth: 576, videoHeight: 768,
+        videoFPS: 25,
+        prefersTemporalFields: true,
+        jpegQuality: 0.84,
+        saturation: 0.92, contrast: 1.12, warmth: -0.013,
+        sensorNoise: 0.023, opticalSoftness: 0.45,
+        highlightBloom: 0.21, chromaMisregistration: 0.48, cornerFalloff: 0.08
+    )
+
+    static let all: [CameraProfile] = [.compact04, .miniDV03]
+}

@@ -1,0 +1,50 @@
+name: Build unsigned iOS IPA
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  ios:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build for physical iPhone without code-signing
+        run: |
+          set -o pipefail
+          xcodebuild -project ArchiveCam.xcodeproj \
+            -scheme ArchiveCam \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee xcodebuild.log
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          test -d "DerivedData/Build/Products/Release-iphoneos/ArchiveCam.app"
+          mkdir -p Payload
+          cp -R "DerivedData/Build/Products/Release-iphoneos/ArchiveCam.app" Payload/
+          zip -qry ArchiveCam-unsigned.ipa Payload
+          unzip -t ArchiveCam-unsigned.ipa
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArchiveCam-unsigned-IPA
+          path: ArchiveCam-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArchiveCam-build-log
+          path: xcodebuild.log
+          if-no-files-found: ignore

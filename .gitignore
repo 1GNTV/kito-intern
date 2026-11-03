@@ -1,0 +1,8 @@
+.DS_Store
+build/
+DerivedData/
+ArchiveCam.xcodeproj/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.ipa
+*.dSYM/
