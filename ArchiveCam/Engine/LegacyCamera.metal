@@ -61,18 +61,18 @@ kernel void retroKernel(
     float2 dy = float2(0.0, step.y * (1.0 + softness * 2.0));
 
     float3 neighbors = (
-       first.sample(s, uv + dx).rgb +
-       first.sample(s, uv - dx).rgb +
-       first.sample(s, uv + dy).rgb +
-       first.sample(s, uv - dy).rgb
+       (secondField ? second.sample(s, uv + dx).rgb : first.sample(s, uv + dx).rgb) +
+       (secondField ? second.sample(s, uv - dx).rgb : first.sample(s, uv - dx).rgb) +
+       (secondField ? second.sample(s, uv + dy).rgb : first.sample(s, uv + dy).rgb) +
+       (secondField ? second.sample(s, uv - dy).rgb : first.sample(s, uv - dy).rgb)
     ) * 0.25;
 
     rgb = mix(rgb, neighbors, clamp(softness * 0.48, 0.0, 0.45));
 
     // Modest off-axis channel misregistration, correlated with distance to center.
     float2 radial = (screenUV - 0.5) * step * p.chromaMisregistration * 8.0;
-    rgb.r = mix(rgb.r, first.sample(s, uv + radial).r, 0.40);
-    rgb.b = mix(rgb.b, first.sample(s, uv - radial).b, 0.40);
+    rgb.r = mix(rgb.r, (secondField ? second.sample(s, uv + radial).r : first.sample(s, uv + radial).r), 0.40);
+    rgb.b = mix(rgb.b, (secondField ? second.sample(s, uv - radial).b : first.sample(s, uv - radial).b), 0.40);
 
     rgb = max(rgb, 0.0);
     rgb = (rgb - 0.5) * p.contrast + 0.5;
@@ -83,8 +83,8 @@ kernel void retroKernel(
 
     // Bright-source halo, not an arbitrary full-screen "light leak".
     float3 around = max(
-        first.sample(s, uv + dx * 2.4).rgb,
-        first.sample(s, uv - dy * 2.4).rgb
+        (secondField ? second.sample(s, uv + dx * 2.4).rgb : first.sample(s, uv + dx * 2.4).rgb),
+        (secondField ? second.sample(s, uv - dy * 2.4).rgb : first.sample(s, uv - dy * 2.4).rgb)
     );
     float bright = max(max(around.r, around.g), around.b);
     rgb += smoothstep(0.82, 1.0, bright) * p.highlightBloom * 0.10;
