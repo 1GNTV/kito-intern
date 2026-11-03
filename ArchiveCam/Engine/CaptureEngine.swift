@@ -342,6 +342,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private func saveVideo(_ url: URL) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
+                try? FileManager.default.removeItem(at: url)
                 self.updateStatus("PHOTOS PERMISSION DENIED")
                 return
             }
