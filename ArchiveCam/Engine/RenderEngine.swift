@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import CoreVideo
+import ImageIO
 import Metal
 import MetalKit
 import UIKit
@@ -19,6 +20,12 @@ final class PreviewStore {
     func publish(_ frame: SimulatedFrame) {
         lock.lock()
         lastFrame = frame
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        lastFrame = nil
         lock.unlock()
     }
 
@@ -116,7 +123,8 @@ final class RenderEngine {
         uniforms.timing = SIMD4(
             seconds.isFinite ? Float(Int(seconds * 1000) % 65536) : 0,
             min(max(gain, 1), 16),
-            second != nil && profile.prefersTemporalFields ? 1 : 0, 0)
+            second != nil && profile.prefersTemporalFields ? 1 : 0,
+            profile.family == .camcorder ? 1 : 0)
         guard let command = queue.makeCommandBuffer(),
               let encoder = command.makeComputeCommandEncoder() else { return nil }
         encoder.setComputePipelineState(filterPipeline)
@@ -155,17 +163,19 @@ final class RenderEngine {
         ciContext.render(
             shifted, to: source,
             bounds: CGRect(x: 0, y: 0, width: width, height: height),
-            colorSpace: CGColorSpaceCreateDeviceRGB()
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
         )
         guard let result = render(
             first: source, second: nil, output: destination,
             profile: profile, time: .zero, gain: gain
         ) else { return nil }
-        let outputImage = CIImage(cvPixelBuffer: result.pixelBuffer)
-        guard let cg = ciContext.createCGImage(
-            outputImage,
-            from: CGRect(x: 0, y: 0, width: profile.photoWidth, height: profile.photoHeight)
-        ) else { return nil }
-        return UIImage(cgImage: cg).jpegData(compressionQuality: profile.jpegQuality)
+        return jpeg(result.pixelBuffer, quality: profile.jpegQuality)
+    }
+
+    func jpeg(_ buffer: CVPixelBuffer, quality: CGFloat) -> Data? {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let image = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: space])
+        return ciContext.jpegRepresentation(of: image, colorSpace: space,
+                                           options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality])
     }
 }

@@ -9,5 +9,5 @@ struct ImagingRecipe {
     var green: SIMD4<Float>
     var blue: SIMD4<Float>
     var encoding: SIMD4<Float> // chroma block width/height, quantisation levels, highlight spread
-    var timing: SIMD4<Float>   // deterministic noise seed, gain, field flag, reserved
+    var timing: SIMD4<Float>   // deterministic noise seed, gain, field flag, SD camcorder flag
 }

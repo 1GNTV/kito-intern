@@ -33,13 +33,18 @@ Each `CameraProfile` describes image-response and capture choices. It is **not**
 
 An iPhone's lens, illuminant, flash, sensor architecture, tone mapping and microphone cannot be perfectly replaced in software. The first implementation receives a processed YUV/BGRA preview feed; it does not magically recover scene-referred RAW video. MiniDV's native DV25 DCT codec is also **not** encoded here: the file is H.264 MP4 with the geometry and some temporal characteristics of DV. Audio is recorded from the real microphone as AAC but is not yet measured/equalized to a particular camcorder. Photograph effects are stronger when validated from a reference camera; the parameter values here are experimental defaults.
 
-### Current output
+### Current output (Engine 04)
 
-- Compact video: 480×640 pixels at up to 30p, in portrait, MP4 + AAC.
-- MiniDV PAL: 576×768 pixels at up to 25p, portrait square-pixel display equivalent to 4:3 PAL geometry; field synthesis is used only if sampled at 50fps.
-- Photos: 1944×2592 for compact and 576×768 for MiniDV-inspired stills, JPEG.
+The finder and files use landscape 4:3 in portrait and landscape interface orientations.
+MiniDV 03 opens by default. Its JPEG with flash off captures the processed finder frame.
+With flash on it uses a separate still exposure. PAL is delivered as a 768×576
+square-pixel image in a JPEG or H.264 file.
 
-For faithful **landscape** output and archival 720×576 anamorphic DV field layout, a future build should add device-orientation handling and verified pixel aspect-ratio metadata, not blindly stretch the output. 
+| Profile | JPEG | H.264 |
+| --- | --- | --- |
+| Pocket CCD 02 | 1600×1200 | 320×240 |
+| Compact 04 | 2592×1944 | 640×480 |
+| MiniDV 03 | 768×576 | 768×576 |
 
 ## Privacy
 

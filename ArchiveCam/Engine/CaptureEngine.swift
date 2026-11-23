@@ -28,7 +28,8 @@ final class CaptureEngine: NSObject, ObservableObject,
     private let photoQueue = DispatchQueue(label: "cam.archive.stills", qos: .userInitiated)
     private var camera: AVCaptureDevice?
     private var configured = false
-    private var activeProfile = CameraProfile.compact02
+    private var activeProfile = CameraProfile.miniDV03
+    private var orientation: AVCaptureVideoOrientation = .portrait
     private var recorder: VideoRecorder?
     private var microphoneGranted = false
     private var fiftyFPSActive = false
@@ -77,6 +78,7 @@ final class CaptureEngine: NSObject, ObservableObject,
         captureQueue.async {
             if self.recorder != nil { self.stopRecordingOnQueue() }
             self.pendingField = nil
+            self.preview.clear()
             if self.session.isRunning { self.session.stopRunning() }
             DispatchQueue.main.async { self.isReady = false }
         }
@@ -115,7 +117,7 @@ final class CaptureEngine: NSObject, ObservableObject,
             videoOutput.setSampleBufferDelegate(self, queue: captureQueue)
             if let connection = videoOutput.connection(with: .video),
                connection.isVideoOrientationSupported {
-                connection.videoOrientation = .portrait
+                connection.videoOrientation = orientation
                 if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
             }
         } else {
@@ -135,10 +137,10 @@ final class CaptureEngine: NSObject, ObservableObject,
             return
         }
         session.addOutput(photoOutput)
-        photoOutput.maxPhotoQualityPrioritization = .balanced
+        photoOutput.maxPhotoQualityPrioritization = .speed
         if let connection = photoOutput.connection(with: .video),
            connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
+            connection.videoOrientation = orientation
         }
         configured = true
         configureFrameRate()
@@ -179,9 +181,31 @@ final class CaptureEngine: NSObject, ObservableObject,
         DispatchQueue.main.async { self.hasFiftyFPS = fields }
     }
 
+    func orient(_ interface: UIInterfaceOrientation) {
+        let next: AVCaptureVideoOrientation
+        switch interface {
+        case .landscapeLeft: next = .landscapeLeft
+        case .landscapeRight: next = .landscapeRight
+        case .portraitUpsideDown: next = .portraitUpsideDown
+        default: next = .portrait
+        }
+        captureQueue.async {
+            guard self.orientation != next else { return }
+            self.orientation = next
+            for output in [self.videoOutput as AVCaptureOutput, self.photoOutput] {
+                if let connection = output.connection(with: .video), connection.isVideoOrientationSupported {
+                    connection.videoOrientation = next
+                }
+            }
+            self.pendingField = nil
+            self.preview.clear()
+        }
+    }
+
     func select(_ profile: CameraProfile) {
         captureQueue.async {
             guard self.recorder == nil else { return }
+            self.preview.clear()
             self.activeProfile = profile
             self.configureFrameRate()
             self.updateStatus("PROFILE: \(profile.name)")
@@ -225,8 +249,22 @@ final class CaptureEngine: NSObject, ObservableObject,
     func shootPhoto() {
         captureQueue.async {
             guard self.configured, self.recorder == nil, self.photoProfile == nil else { return }
+            // A camcorder frame grab uses the same optics, exposure and SD
+            // sample as the finder. Physical flash needs a still exposure.
+            if self.activeProfile.family == .camcorder, !self.isFlashEnabled,
+               let frame = self.preview.current(), let renderer = self.renderer {
+                let quality = self.activeProfile.jpegQuality
+                self.photoQueue.async {
+                    guard let jpeg = renderer.jpeg(frame.pixelBuffer, quality: quality) else {
+                        self.updateStatus("STILL PROCESSING FAILED")
+                        return
+                    }
+                    self.savePhoto(jpeg)
+                }
+                return
+            }
             let settings = AVCapturePhotoSettings()
-            settings.photoQualityPrioritization = .balanced
+            settings.photoQualityPrioritization = .speed
             if self.camera?.hasFlash == true {
                 settings.flashMode = self.isFlashEnabled ? .on : .off
             }

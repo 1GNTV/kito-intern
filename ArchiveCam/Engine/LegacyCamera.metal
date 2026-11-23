@@ -55,24 +55,50 @@ kernel void retroKernel(
     float2 footprint = (cropToAspect(uv0 + 1.0/size, sourceAspect, targetAspect) - uv);
     // All optical taps use the SAME instant for a given output field.
     bool field = p.timing.z > 0.5 && (gid.y & 1u) != 0;
-    float3 centre = field ? sensorSample(second, uv, footprint) : sensorSample(first, uv, footprint);
-    float2 dx = float2(footprint.x, 0), dy = float2(0, footprint.y);
-    float3 surround;
-    if (field) surround = (sensorSample(second,uv+dx,footprint)+sensorSample(second,uv-dx,footprint)+sensorSample(second,uv+dy,footprint)+sensorSample(second,uv-dy,footprint))*0.25;
-    else surround = (sensorSample(first,uv+dx,footprint)+sensorSample(first,uv-dx,footprint)+sensorSample(first,uv+dy,footprint)+sensorSample(first,uv-dy,footprint))*0.25;
+    bool camcorder = p.timing.w > 0.5;
+    // SD luma is band limited before aperture correction. Vertical averaging
+    // also suppresses twitter from fine horizontal lines on a field display.
+    float2 dx = float2(footprint.x * (camcorder ? 1.35 : 1.0), 0);
+    float2 dy = float2(0, footprint.y);
+    float3 centre, horizontal, vertical;
+    if (field) {
+        centre = sensorSample(second, uv, footprint);
+        horizontal = 0.5 * (sensorSample(second, uv+dx, footprint) + sensorSample(second, uv-dx, footprint));
+        vertical = 0.5 * (sensorSample(second, uv+dy, footprint) + sensorSample(second, uv-dy, footprint));
+    } else {
+        centre = sensorSample(first, uv, footprint);
+        horizontal = 0.5 * (sensorSample(first, uv+dx, footprint) + sensorSample(first, uv-dx, footprint));
+        vertical = 0.5 * (sensorSample(first, uv+dy, footprint) + sensorSample(first, uv-dy, footprint));
+    }
+    float3 surround = mix(horizontal, vertical, camcorder ? 0.38 : 0.50);
     float radius = length((uv0 - 0.5)*1.4142);
-    float3 rgb = mix(centre, surround, min(0.8, p.optics.x * (0.35 + radius*0.65)));
+    float3 rgb = mix(centre, surround, min(0.8, p.optics.x * (0.55 + radius*0.45)));
     rgb += clamp(centre-surround, -0.16, 0.16)*p.optics.y;
     float2 radial = (uv0-0.5)*footprint*p.optics.z;
     rgb.r = mix(rgb.r, field ? second.sample(linearSampler,uv+radial).r : first.sample(linearSampler,uv+radial).r, 0.25);
     rgb.b = mix(rgb.b, field ? second.sample(linearSampler,uv-radial).b : first.sample(linearSampler,uv-radial).b, 0.25);
     rgb *= 1.0-p.optics.w*radius*radius;
+    // Charge from bright neighbours spreads close to a light/dark boundary.
+    // A uniform bright sky has no local excess to spill.
+    float3 spill = max(surround - max(centre, float3(0.72)), 0.0);
+    rgb += spill * p.encoding.w;
     rgb = cameraResponse(rgb,p);
     float y = dot(rgb,float3(0.299,0.587,0.114));
     // Sample colour at a reduced lattice, preserving full luminance resolution.
     float2 cell = (floor(float2(gid)/p.encoding.xy)*p.encoding.xy + p.encoding.xy*0.5)/size;
     float2 cuv = cropToAspect(cell,sourceAspect,targetAspect);
-    float3 low = cameraResponse(field ? sensorSample(second,cuv,footprint*p.encoding.xy) : sensorSample(first,cuv,footprint*p.encoding.xy),p);
+    float2 chromaFootprint = footprint * p.encoding.xy;
+    float3 chromaSample = field ? sensorSample(second,cuv,chromaFootprint)
+                                : sensorSample(first,cuv,chromaFootprint);
+    if (camcorder) {
+        // Horizontal colour bandwidth is lower than luma. Model the mild
+        // phase delay in the colour path before forming colour differences.
+        float2 previousCell = cuv - float2(chromaFootprint.x, 0);
+        float3 previous = field ? sensorSample(second,previousCell,chromaFootprint)
+                                : sensorSample(first,previousCell,chromaFootprint);
+        chromaSample = mix(chromaSample, previous, 0.30);
+    }
+    float3 low = cameraResponse(chromaSample,p);
     float lowY = dot(low,float3(0.299,0.587,0.114));
     float2 cbcr = float2((low.b-lowY)*0.564,(low.r-lowY)*0.713);
     float gain = sqrt(clamp(p.timing.y,1.0,16.0));
@@ -85,8 +111,6 @@ kernel void retroKernel(
     y = round(y*levels)/levels;
     cbcr = round(cbcr*levels)/levels;
     rgb = float3(y+1.403*cbcr.y,y-0.344*cbcr.x-0.714*cbcr.y,y+1.773*cbcr.x);
-    float highlight = smoothstep(0.88,1.0,max(max(surround.r,surround.g),surround.b));
-    rgb += highlight*p.encoding.w*0.12;
     output.write(float4(clamp(rgb,0.0,1.0),1.0),gid);
 }
 

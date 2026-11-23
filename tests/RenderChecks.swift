@@ -7,7 +7,12 @@ struct RenderChecks {
         precondition(MemoryLayout<ImagingRecipe>.stride == 128)
         precondition(CameraProfile.all.count == 3)
         precondition(CameraProfile.compact02.videoFPS == 15)
-        precondition(CameraProfile.compact02.videoWidth == 240)
+        for p in CameraProfile.all {
+            precondition(p.photoWidth * 3 == p.photoHeight * 4)
+            precondition(p.videoWidth * 3 == p.videoHeight * 4)
+        }
+        precondition(CameraProfile.miniDV03.photoWidth == 768 && CameraProfile.miniDV03.photoHeight == 576)
+        precondition(CameraProfile.compact02.videoWidth == 320)
         guard let device = MTLCreateSystemDefaultDevice() else {
             print("GPU runtime tests SKIPPED: runner exposes no Metal device")
             return
@@ -15,7 +20,7 @@ struct RenderChecks {
         let library = try device.makeLibrary(URL: URL(fileURLWithPath: "/tmp/archivecam-test.metallib"))
         let pipeline = try device.makeComputePipelineState(function: library.makeFunction(name: "retroKernel")!)
         let queue = device.makeCommandQueue()!
-        let width = 240, height = 320
+        let width = 320, height = 240
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
         desc.storageMode = .shared
         desc.usage = [.shaderRead, .shaderWrite]
@@ -32,17 +37,17 @@ struct RenderChecks {
         pixels.withUnsafeBytes {
             input.replace(region: MTLRegionMake2D(0,0,width,height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width*4)
         }
-        func run(_ profile: CameraProfile, gain: Float) throws -> [UInt8] {
+        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil) throws -> [UInt8] {
             let output = device.makeTexture(descriptor: desc)!
             var recipe = profile.recipe
             recipe.sensor.x = Float(width)
             recipe.sensor.y = Float(height)
-            recipe.timing = SIMD4(42,gain,0,0)
+            recipe.timing = SIMD4(42,gain,0,profile.family == .camcorder ? 1 : 0)
             let command = queue.makeCommandBuffer()!
             let encoder = command.makeComputeCommandEncoder()!
             encoder.setComputePipelineState(pipeline)
-            encoder.setTexture(input,index:0)
-            encoder.setTexture(input,index:1)
+            encoder.setTexture(source ?? input,index:0)
+            encoder.setTexture(source ?? input,index:1)
             encoder.setTexture(output,index:2)
             encoder.setBytes(&recipe,length:128,index:0)
             encoder.dispatchThreads(MTLSize(width:width,height:height,depth:1), threadsPerThreadgroup:MTLSize(width:8,height:8,depth:1))
@@ -69,6 +74,26 @@ struct RenderChecks {
         precondition(distance(pocket,dv)>2)
         precondition(distance(pocket,noisy)>1)
         precondition(pocket.enumerated().allSatisfy { $0.offset % 4 != 3 || $0.element == 255 })
+        let portraitDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 320, height: 480, mipmapped: false)
+        portraitDesc.storageMode = .shared
+        let portrait = device.makeTexture(descriptor: portraitDesc)!
+        var chart = [UInt8](repeating: 255, count: 320*480*4)
+        for y in 0..<480 {
+            for x in 0..<320 {
+                let value: UInt8 = (120..<360).contains(y) ? (x < 160 ? 65 : 165) : 255
+                let i = (320*y+x)*4
+                for c in 0..<3 { chart[i+c] = value }
+            }
+        }
+        chart.withUnsafeBytes {
+            portrait.replace(region: MTLRegionMake2D(0,0,320,480), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 320*4)
+        }
+        let cropped = try run(.miniDV03, gain: 1, source: portrait)
+        for y in [8,120,231] {
+            let left = Int(cropped[(y*width+80)*4])
+            let right = Int(cropped[(y*width+240)*4])
+            precondition(left < 120 && right > left+60 && right < 240, "portrait crop, scale or orientation")
+        }
         print("GPU tests passed; pocket/compact MAE \(distance(pocket,compact)), pocket/DV MAE \(distance(pocket,dv)); four renders wall ms \(Date().timeIntervalSince(start)*1000)")
         for _ in 0..<10 { _ = try run(.compact02,gain:1) }
         print("Synthetic GPU workload complete. Not an iPhone realtime performance measurement.")

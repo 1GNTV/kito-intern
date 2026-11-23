@@ -12,7 +12,7 @@ private enum ArchiveStyle {
 
 struct CameraScreen: View {
     @StateObject private var camera = CaptureEngine()
-    @State private var profile = CameraProfile.compact02
+    @State private var profile = CameraProfile.miniDV03
     @State private var mode: CaptureMode = .photo
     @State private var flash = false
     @State private var zoom: Double = 1.0
@@ -21,27 +21,31 @@ struct CameraScreen: View {
 
     var body: some View {
         GeometryReader { geo in
-            let availableWidth = max(180, geo.size.width - 40)
-            let finderHeight = min(availableWidth * 4.0 / 3.0, geo.size.height * 0.54)
-
-            VStack(spacing: 0) {
-                masthead
-                deviceSelector
-                    .padding(.top, 21)
-
-                Spacer(minLength: 12)
-
-                viewfinder
-                    .frame(height: finderHeight)
-                    .accessibilityLabel("Simulated live camera preview")
-                    .onTapGesture { camera.refocus() }
-
-                Spacer(minLength: 13)
-
-                controls
-                footer
-                    .padding(.top, 18)
-                    .padding(.bottom, 8)
+            Group {
+                if geo.size.width > geo.size.height {
+                    HStack(spacing: 18) {
+                        finder
+                        ScrollView {
+                            VStack(spacing: 14) {
+                                masthead
+                                deviceSelector
+                                controls
+                                footer
+                            }
+                        }
+                        .frame(width: min(280, geo.size.width * 0.38))
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        masthead
+                        deviceSelector.padding(.top, 21)
+                        Spacer(minLength: 12)
+                        finder.frame(maxHeight: geo.size.height * 0.48)
+                        Spacer(minLength: 13)
+                        controls
+                        footer.padding(.top, 18).padding(.bottom, 8)
+                    }
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 7)
@@ -57,6 +61,13 @@ struct CameraScreen: View {
         .sheet(isPresented: $showingInfo) { infoSheet }
     }
 
+    private var finder: some View {
+        viewfinder
+            .aspectRatio(4.0 / 3.0, contentMode: .fit)
+            .accessibilityLabel("Simulated live camera preview")
+            .onTapGesture { camera.refocus() }
+    }
+
     private var masthead: some View {
         HStack(alignment: .center) {
             HStack(spacing: 9) {
@@ -69,7 +80,7 @@ struct CameraScreen: View {
                     .foregroundStyle(ArchiveStyle.chalk)
             }
             Spacer()
-            Text("ENGINE  03")
+            Text("ENGINE  04")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .tracking(0.8)
                 .foregroundStyle(ArchiveStyle.muted)
@@ -122,7 +133,7 @@ struct CameraScreen: View {
         ZStack {
             Rectangle().fill(Color.black)
             if let renderer = camera.renderer {
-                MetalPreview(renderer: renderer, store: camera.preview)
+                MetalPreview(renderer: renderer, store: camera.preview, orientationChanged: camera.orient)
                     .clipped()
             }
             Rectangle()
@@ -191,8 +202,6 @@ struct CameraScreen: View {
             }
             .padding(13)
         }
-        .aspectRatio(3.0 / 4.0, contentMode: .fit)
-        .frame(maxWidth: .infinity)
     }
 
     private var controls: some View {
