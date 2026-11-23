@@ -7,19 +7,26 @@ final class VideoRecorder {
     let url: URL
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
+    private let microphoneModel: CameraMicrophone
+    private var audioProcessingFailed = false
     private let audioInput: AVAssetWriterInput?
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private var firstTime: CMTime?
     private(set) var appendedFrames = 0
+    private var videoBackpressure = false
+    private var audioBackpressure = false
 
     init?(profile: CameraProfile, microphone: Bool) {
+        microphoneModel = CameraMicrophone(profile: profile)
         let directory = FileManager.default.temporaryDirectory
         let filename = "ArchiveCam-\(UUID().uuidString).mp4"
         self.url = directory.appendingPathComponent(filename)
         guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else {
             return nil
         }
-        let bitRate = profile.family == .camcorder ? 2_400_000 : 2_800_000
+        let samplesPerSecond = profile.videoWidth * profile.videoHeight * profile.videoFPS
+        let bitsPerPixel = profile.family == .camcorder ? 0.44 : 0.56
+        let bitRate = Int(Double(samplesPerSecond) * bitsPerPixel)
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: profile.videoWidth,
@@ -51,7 +58,7 @@ final class VideoRecorder {
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 44_100,
                 AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 96_000
+                AVEncoderBitRateKey: profile.family == .camcorder ? 80_000 : 48_000
             ]
             let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             audio.expectsMediaDataInRealTime = true
@@ -59,7 +66,7 @@ final class VideoRecorder {
                 writer.add(audio)
                 self.audioInput = audio
             } else {
-                self.audioInput = nil
+                return nil
             }
         } else {
             self.audioInput = nil
@@ -73,11 +80,15 @@ final class VideoRecorder {
             writer.startSession(atSourceTime: time)
             firstTime = time
         }
-        guard writer.status == .writing, videoInput.isReadyForMoreMediaData else {
+        guard writer.status == .writing else { return }
+        guard videoInput.isReadyForMoreMediaData else {
+            videoBackpressure = true
             return
         }
         if adaptor.append(pixelBuffer, withPresentationTime: time) {
             appendedFrames += 1
+        } else {
+            videoBackpressure = true
         }
     }
 
@@ -85,12 +96,30 @@ final class VideoRecorder {
         guard let audioInput, let firstTime,
               CMSampleBufferDataIsReady(sampleBuffer),
               CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= firstTime,
-              writer.status == .writing,
-              audioInput.isReadyForMoreMediaData else { return }
-        _ = audioInput.append(sampleBuffer)
+              writer.status == .writing else { return }
+        guard !audioProcessingFailed else { return }
+        guard let processed = microphoneModel.process(sampleBuffer) else {
+            audioProcessingFailed = true
+            return
+        }
+        guard audioInput.isReadyForMoreMediaData, audioInput.append(processed) else {
+            audioBackpressure = true
+            return
+        }
     }
 
+    func noteDroppedVideoFrame() { videoBackpressure = true }
+
     func finish(_ completion: @escaping (Result<URL, Error>) -> Void) {
+        guard !videoBackpressure && !audioBackpressure && !audioProcessingFailed else {
+            writer.cancelWriting()
+            try? FileManager.default.removeItem(at: url)
+            completion(.failure(NSError(
+                domain: "ArchiveCam", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: audioProcessingFailed ? "Microphone audio could not be processed." : "Capture or encoder could not keep up; recording discarded."]
+            )))
+            return
+        }
         guard firstTime != nil else {
             completion(.failure(NSError(
                 domain: "ArchiveCam", code: 1,

@@ -9,14 +9,14 @@
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.9.0</string>
+  <key>CFBundleVersion</key><string>900</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>NSCameraUsageDescription</key><string>ArchiveCam needs camera access to capture photographs and videos.</string>
   <key>NSMicrophoneUsageDescription</key><string>ArchiveCam records sound with your videos.</string>
   <key>NSPhotoLibraryAddUsageDescription</key><string>ArchiveCam saves your photographs and videos to Photos.</string>
   <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string><string>metal</string></array>
-  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
   <key>UIUserInterfaceStyle</key><string>Dark</string>
   <key>UILaunchScreen</key><dict/>
 </dict>

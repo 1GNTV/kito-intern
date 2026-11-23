@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import CoreVideo
+import ImageIO
 import Metal
 import MetalKit
 import UIKit
@@ -22,40 +23,16 @@ final class PreviewStore {
         lock.unlock()
     }
 
+    func clear() {
+        lock.lock()
+        lastFrame = nil
+        lock.unlock()
+    }
+
     func current() -> SimulatedFrame? {
         lock.lock()
         defer { lock.unlock() }
         return lastFrame
-    }
-}
-
-struct FilterParameters {
-    var saturation: Float
-    var contrast: Float
-    var warmth: Float
-    var sensorNoise: Float
-    var opticalSoftness: Float
-    var highlightBloom: Float
-    var chromaMisregistration: Float
-    var cornerFalloff: Float
-    var timeSeconds: Float
-    var seed: Float
-    var useTemporalFields: UInt32
-    var reserved: UInt32 = 0
-
-    init(profile: CameraProfile, time: CMTime, fields: Bool) {
-        saturation = profile.saturation
-        contrast = profile.contrast
-        warmth = profile.warmth
-        sensorNoise = profile.sensorNoise
-        opticalSoftness = profile.opticalSoftness
-        highlightBloom = profile.highlightBloom
-        chromaMisregistration = profile.chromaMisregistration
-        cornerFalloff = profile.cornerFalloff
-        let seconds = CMTimeGetSeconds(time)
-        timeSeconds = seconds.isFinite ? Float(seconds.truncatingRemainder(dividingBy: 10_000)) : 0
-        seed = Float.random(in: 0...1024)
-        useTemporalFields = fields ? 1 : 0
     }
 }
 
@@ -65,6 +42,7 @@ final class RenderEngine {
     let screenPipeline: MTLRenderPipelineState
     let ciContext: CIContext
     private let filterPipeline: MTLComputePipelineState
+    private let meterPipeline: MTLComputePipelineState
     private var textureCache: CVMetalTextureCache?
 
     init?() {
@@ -74,6 +52,8 @@ final class RenderEngine {
               let computeFunction = library.makeFunction(name: "retroKernel"),
               let vertex = library.makeFunction(name: "fullscreenVertex"),
               let fragment = library.makeFunction(name: "fullscreenFragment"),
+              let meterFunction = library.makeFunction(name: "compactMeter"),
+              let meter = try? gpu.makeComputePipelineState(function: meterFunction),
               let compute = try? gpu.makeComputePipelineState(function: computeFunction) else {
             return nil
         }
@@ -89,7 +69,8 @@ final class RenderEngine {
         self.queue = queue
         self.screenPipeline = screen
         self.filterPipeline = compute
-        self.ciContext = CIContext(mtlDevice: gpu)
+        self.meterPipeline = meter
+        self.ciContext = CIContext(mtlDevice: gpu, options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
 
         var cache: CVMetalTextureCache?
         let result = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, gpu, nil, &cache)
@@ -129,7 +110,8 @@ final class RenderEngine {
         second: CVPixelBuffer?,
         output: CVPixelBuffer,
         profile: CameraProfile,
-        time: CMTime
+        time: CMTime,
+        gain: Float = 1
     ) -> SimulatedFrame? {
         guard let inputRef = texture(for: first),
               let firstTexture = CVMetalTextureGetTexture(inputRef),
@@ -138,22 +120,32 @@ final class RenderEngine {
         let secondRef = second.flatMap { texture(for: $0) }
         let secondTexture = secondRef.flatMap { CVMetalTextureGetTexture($0) } ?? firstTexture
 
-        var uniforms = FilterParameters(
-            profile: profile, time: time,
-            fields: second != nil && profile.prefersTemporalFields
-        )
-        guard let command = queue.makeCommandBuffer(),
-              let encoder = command.makeComputeCommandEncoder() else { return nil }
+        var uniforms = profile.recipe
+        uniforms.sensor.x = Float(CVPixelBufferGetWidth(output))
+        uniforms.sensor.y = Float(CVPixelBufferGetHeight(output))
+        let seconds = CMTimeGetSeconds(time)
+        uniforms.timing = SIMD4(
+            seconds.isFinite ? Float(Int(seconds * 1000) % 65536) : 0,
+            min(max(gain, 1), 16),
+            second != nil && profile.prefersTemporalFields ? 1 : 0,
+            profile.family == .camcorder ? 1 : 0)
+        guard let command = queue.makeCommandBuffer() else { return nil }
+        var meter: MTLBuffer?
+        if profile.id == CameraProfile.ccd3MP.id {
+            guard let buffer = CompactMeter.encode(input: firstTexture, command: command,
+                                                  pipeline: meterPipeline) else { return nil }
+            meter = buffer
+        }
+        guard let encoder = command.makeComputeCommandEncoder() else { return nil }
+        CompactMeter.bind(meter, to: encoder)
         encoder.setComputePipelineState(filterPipeline)
         encoder.setTexture(firstTexture, index: 0)
         encoder.setTexture(secondTexture, index: 1)
         encoder.setTexture(outputTexture, index: 2)
-        encoder.setBytes(&uniforms, length: MemoryLayout<FilterParameters>.stride, index: 0)
-        let w = filterPipeline.threadExecutionWidth
-        let h = max(1, filterPipeline.maxTotalThreadsPerThreadgroup / w)
-        encoder.dispatchThreads(
-            MTLSize(width: outputTexture.width, height: outputTexture.height, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1)
+        encoder.setBytes(&uniforms, length: MemoryLayout<ImagingRecipe>.stride, index: 0)
+        encoder.dispatchThreadgroups(
+            MTLSize(width: (outputTexture.width + 7) / 8, height: (outputTexture.height + 7) / 8, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 1)
         )
         encoder.endEncoding()
         command.commit()
@@ -162,11 +154,17 @@ final class RenderEngine {
         return SimulatedFrame(pixelBuffer: output, metalTexture: outputRef)
     }
 
-    func processStill(_ data: Data, profile: CameraProfile) -> Data? {
+    func processStill(_ data: Data, profile: CameraProfile, gain: Float = 1,
+                      cropAnchor: CGPoint? = nil) -> Data? {
         guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
             return nil
         }
-        let extent = image.extent.integral
+        let bounds = image.extent.integral
+        let extent = cropAnchor.map { anchor in
+            let topDown = StillFraming.rect(in: bounds.size, anchor: anchor)
+            return CGRect(x: bounds.minX + topDown.minX, y: bounds.maxY - topDown.maxY,
+                          width: topDown.width, height: topDown.height)
+        } ?? bounds
         let width = Int(extent.width)
         let height = Int(extent.height)
         guard width > 0, height > 0,
@@ -174,23 +172,25 @@ final class RenderEngine {
               let destination = makePixelBuffer(width: profile.photoWidth, height: profile.photoHeight) else {
             return nil
         }
-        let shifted = image.transformed(
+        let shifted = image.cropped(to: extent).transformed(
             by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
         )
         ciContext.render(
             shifted, to: source,
             bounds: CGRect(x: 0, y: 0, width: width, height: height),
-            colorSpace: CGColorSpaceCreateDeviceRGB()
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
         )
         guard let result = render(
             first: source, second: nil, output: destination,
-            profile: profile, time: .zero
+            profile: profile, time: .zero, gain: gain
         ) else { return nil }
-        let outputImage = CIImage(cvPixelBuffer: result.pixelBuffer)
-        guard let cg = ciContext.createCGImage(
-            outputImage,
-            from: CGRect(x: 0, y: 0, width: profile.photoWidth, height: profile.photoHeight)
-        ) else { return nil }
-        return UIImage(cgImage: cg).jpegData(compressionQuality: profile.jpegQuality)
+        return jpeg(result.pixelBuffer, quality: profile.jpegQuality)
+    }
+
+    func jpeg(_ buffer: CVPixelBuffer, quality: CGFloat) -> Data? {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let image = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: space])
+        return ciContext.jpegRepresentation(of: image, colorSpace: space,
+                                           options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality])
     }
 }

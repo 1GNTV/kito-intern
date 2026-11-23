@@ -33,13 +33,26 @@ Each `CameraProfile` describes image-response and capture choices. It is **not**
 
 An iPhone's lens, illuminant, flash, sensor architecture, tone mapping and microphone cannot be perfectly replaced in software. The first implementation receives a processed YUV/BGRA preview feed; it does not magically recover scene-referred RAW video. MiniDV's native DV25 DCT codec is also **not** encoded here: the file is H.264 MP4 with the geometry and some temporal characteristics of DV. Audio is recorded from the real microphone as AAC but is not yet measured/equalized to a particular camcorder. Photograph effects are stronger when validated from a reference camera; the parameter values here are experimental defaults.
 
-### Current output
+### Current output (ArchiveCam 0.9)
 
-- Compact video: 480×640 pixels at up to 30p, in portrait, MP4 + AAC.
-- MiniDV PAL: 576×768 pixels at up to 25p, portrait square-pixel display equivalent to 4:3 PAL geometry; field synthesis is used only if sampled at 50fps.
-- Photos: 1944×2592 for compact and 576×768 for MiniDV-inspired stills, JPEG.
+ArchiveCam opens in landscape and supports either horizontal grip. The finder and files use 4:3.
+The grade keeps neutral subjects neutral and gently boosts middle-strength colours. The right-hand grip holds the shutter, photo/video selector and zoom rocker.
+The finder renders sensor colour, optics and luminance detail directly. Compression happens once when writing the JPEG or H.264 file. Movie bitrate scales with frame size and frame rate and the encoder can reuse detail between frames. The default 3 MP still profile exports at JPEG quality 0.92.
+The landscape finder takes the full available height. The default photo profile draws a 960×720 finder image. Tap FLASH for stills or LIGHT for a continuous video lamp. While the app is open on a compatible iPhone, Camera Control takes a photo or starts/stops a video. A light press and swipe adjusts zoom, with the actual lens factor displayed in the finder.
+Movies use a mono microphone with profile-specific bandwidth, a vocal presence band, soft peak limiting, a quiet signal-dependent preamp floor and a slow automatic level recovery after loud sounds. AAC is encoded at 48 kb/s for compact cameras and 80 kb/s for MiniDV.
+Compact CCD 3MP opens by default and uses a dedicated still exposure. Its 2048×1536 format takes the Nikon COOLPIX 3200 as an example; the colour response is an artistic interpretation. The profile uses gentler quantisation to retain sky gradients.
+Compact CCD 3MP measures 256 points inside the 4:3 frame on the GPU. Lit scenes get more separation between shade and diffuse whites. In darker scenes the same meter instead increases shadow noise and local light spread. Compact still mode allows automatic exposure up to 1/8 second when the current capture format supports it. Video uses its selected frame cadence.
+Choose **Camera settings → Import photo** to place an existing image in the 4:3 frame. Drag the source, develop it with the selected camera profile, then save the resulting JPEG.
+MiniDV 03 remains selectable. Its JPEG with flash off captures the processed finder frame.
+With flash on it uses a separate still exposure. PAL is delivered as a 768×576
+square-pixel image in a JPEG or H.264 file.
 
-For faithful **landscape** output and archival 720×576 anamorphic DV field layout, a future build should add device-orientation handling and verified pixel aspect-ratio metadata, not blindly stretch the output. 
+| Profile | JPEG | H.264 |
+| --- | --- | --- |
+| Pocket CCD 02 | 1600×1200 | 320×240 |
+| Compact CCD 3MP | 2048×1536 | 640×480 |
+| Compact 04 | 2592×1944 | 640×480 |
+| MiniDV 03 | 768×576 | 768×576 |
 
 ## Privacy
 
