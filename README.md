@@ -33,9 +33,11 @@ Each `CameraProfile` describes image-response and capture choices. It is **not**
 
 An iPhone's lens, illuminant, flash, sensor architecture, tone mapping and microphone cannot be perfectly replaced in software. The first implementation receives a processed YUV/BGRA preview feed; it does not magically recover scene-referred RAW video. MiniDV's native DV25 DCT codec is also **not** encoded here: the file is H.264 MP4 with the geometry and some temporal characteristics of DV. Audio is recorded from the real microphone as AAC but is not yet measured/equalized to a particular camcorder. Photograph effects are stronger when validated from a reference camera; the parameter values here are experimental defaults.
 
-### Current output (Engine 04)
+### Current output (ArchiveCam 0.5)
 
-The finder and files use landscape 4:3 in portrait and landscape interface orientations.
+ArchiveCam opens in landscape and supports either horizontal grip. The finder and files use 4:3.
+The grade keeps neutral subjects neutral and gently boosts middle-strength colours. The right-hand grip holds the shutter, photo/video selector and zoom rocker.
+Video uses a mono microphone response with profile-specific bandwidth and mild peak compression.
 MiniDV 03 opens by default. Its JPEG with flash off captures the processed finder frame.
 With flash on it uses a separate still exposure. PAL is delivered as a 768×576
 square-pixel image in a JPEG or H.264 file.

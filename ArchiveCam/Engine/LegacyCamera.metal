@@ -47,24 +47,21 @@ float3 cameraResponse(float3 rgb, constant FilterUniforms &p) {
     rgb = min(min(level, 0.67) + excess / (1.0 + 1.42 * excess), 1.0);
     return pow(rgb, float3(p.tone.z / 2.2));
 }
-// Gentle print-like response in display space, after the sensor and colour encoding.
-float3 memoryColor(float3 rgb) {
+// A neutral grey stays on the grey axis. Mid-strength colours get a gentle
+// boost; already vivid colours retain their hue at the edge of the RGB gamut.
+float3 cameraColor(float3 rgb) {
     rgb = clamp(rgb, 0.0, 1.0);
     float y = dot(rgb, float3(0.299, 0.587, 0.114));
     float3 chroma = rgb - y;
-    float strongest = max(rgb.r, max(rgb.g, rgb.b)) - min(rgb.r, min(rgb.g, rgb.b));
-    float colourGain = 0.93 - 0.14 * smoothstep(0.18, 0.86, strongest);
-    // Restrict the palette locally: leafy greens move toward olive, sky blues
-    // toward cyan. A near-neutral patch receives only the tonal balance.
-    float foliage = max(0.0, min(rgb.g - rgb.r, rgb.g - rgb.b));
-    float sky = max(0.0, min(rgb.b - rgb.r, rgb.b - rgb.g));
-    chroma += foliage * float3(0.35, -0.08, -0.24) + sky * float3(-0.14, 0.20, -0.14);
-    float mid = 4.0 * y * (1.0 - y);
-    float tone = 0.018 + 0.96 * y + 0.064 * mid * (2.0 * y - 0.85);
-    float light = smoothstep(0.22, 0.83, y);
-    float3 tint = mix(float3(-0.004, 0.006, 0.015), float3(0.040, 0.013, -0.035), light);
-    tint *= 1.0 - 0.50 * smoothstep(0.90, 1.0, y);
-    return clamp(tone + chroma * colourGain + tint, 0.0, 1.0);
+    float high = max(chroma.r, max(chroma.g, chroma.b));
+    float low = -min(chroma.r, min(chroma.g, chroma.b));
+    float range = high + low;
+    float strength = smoothstep(0.015, 0.12, range) * (1.0 - smoothstep(0.42, 0.92, range));
+    float warmth = smoothstep(0.0, 0.12, rgb.r - rgb.g) * smoothstep(0.0, 0.09, rgb.g - rgb.b);
+    float gain = 1.0 + 0.24 * strength * (1.0 - 0.55 * warmth) * smoothstep(0.035, 0.17, y);
+    float tone = 0.010 + 0.98 * y + 0.035 * (4.0 * y * (1.0 - y)) * (2.0 * y - 0.72);
+    float room = min((1.0 - tone) / max(high, 0.00001), tone / max(low, 0.00001));
+    return clamp(tone + chroma * min(gain, room), 0.0, 1.0);
 }
 kernel void retroKernel(
     texture2d<float, access::sample> first [[texture(0)]],
@@ -142,7 +139,7 @@ kernel void retroKernel(
     y = round(y*levels)/levels;
     cbcr = round(cbcr*levels)/levels;
     rgb = float3(y+1.403*cbcr.y,y-0.344*cbcr.x-0.714*cbcr.y,y+1.773*cbcr.x);
-    output.write(float4(memoryColor(rgb),1.0),gid);
+    output.write(float4(cameraColor(rgb),1.0),gid);
 }
 
 struct FullscreenVertex {

@@ -106,9 +106,9 @@ struct CameraProfile: Identifiable, Equatable {
             sensor: SIMD4(0, 0, 0.010, 0.008),
             optics: SIMD4(0.26, 1.14, 0.23, 0.070),
             tone: SIMD4(0.005, 1.18, 1.07, 0.86),
-            red: SIMD4(0.92, 0.06, 0.02, 0),
-            green: SIMD4(0.02, 0.97, 0.01, 0),
-            blue: SIMD4(0.02, 0.055, 0.925, 0),
+            red: SIMD4(0.994, 0.005, 0.001, 0),
+            green: SIMD4(0.003, 0.996, 0.001, 0),
+            blue: SIMD4(0.001, 0.008, 0.991, 0),
             encoding: SIMD4(2, 2, 219, 0.26),
             timing: .zero)
     }

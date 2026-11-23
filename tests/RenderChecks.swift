@@ -105,6 +105,28 @@ struct RenderChecks {
         }
         precondition(stepContrast(cropped) > stepContrast(uncorrected) + 6,
                      "the SD luma contour must retain an edge across the chroma footprint")
+        // A grey reference must remain neutral while a blue sky and a warm lamp
+        // remain distinct. Average patches to exclude the simulated sensor noise.
+        let patches: [[UInt8]] = [[140,140,140], [55,85,220], [215,140,60]]
+        for y in 0..<480 {
+            for x in 0..<320 {
+                let colour = patches[min(2, x / 107)]
+                for c in 0..<3 { chart[(y*320+x)*4+c] = colour[c] }
+            }
+        }
+        chart.withUnsafeBytes {
+            portrait.replace(region: MTLRegionMake2D(0,0,320,480), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 320*4)
+        }
+        let colours = try run(.miniDV03, gain: 1, source: portrait)
+        func patch(_ x: Int, _ c: Int) -> Int {
+            var sum = 0
+            for row in 90..<110 {
+                for col in x..<(x+20) { sum += Int(colours[(row*width+col)*4+c]) }
+            }
+            return sum / 400
+        }
+        precondition(abs(patch(40,0)-patch(40,2)) < 3 && abs(patch(40,1)-patch(40,2)) < 3)
+        precondition(patch(145,2) > patch(145,1)+70 && patch(250,0) > patch(250,2)+80)
         print("GPU tests passed; pocket/compact MAE \(distance(pocket,compact)), pocket/DV MAE \(distance(pocket,dv)); four renders wall ms \(Date().timeIntervalSince(start)*1000)")
         for _ in 0..<10 { _ = try run(.compact02,gain:1) }
         print("Synthetic GPU workload complete. Not an iPhone realtime performance measurement.")

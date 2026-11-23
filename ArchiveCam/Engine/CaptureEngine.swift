@@ -29,7 +29,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private var camera: AVCaptureDevice?
     private var configured = false
     private var activeProfile = CameraProfile.miniDV03
-    private var orientation: AVCaptureVideoOrientation = .portrait
+    private var orientation: AVCaptureVideoOrientation = .landscapeRight
     private var recorder: VideoRecorder?
     private var microphoneGranted = false
     private var fiftyFPSActive = false
@@ -169,6 +169,9 @@ final class CaptureEngine: NSObject, ObservableObject,
                 let duration = CMTime(value: 1, timescale: CMTimeScale(Int32(rate)))
                 camera.activeVideoMinFrameDuration = duration
                 camera.activeVideoMaxFrameDuration = duration
+                if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                    camera.whiteBalanceMode = .continuousAutoWhiteBalance
+                }
                 camera.automaticallyAdjustsVideoHDREnabled = false
                 if camera.activeFormat.isVideoHDRSupported { camera.isVideoHDREnabled = false }
                 if camera.isFocusModeSupported(.autoFocus) { camera.focusMode = .autoFocus }

@@ -16,7 +16,7 @@
   <key>NSMicrophoneUsageDescription</key><string>ArchiveCam records sound with your videos.</string>
   <key>NSPhotoLibraryAddUsageDescription</key><string>ArchiveCam saves your photographs and videos to Photos.</string>
   <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string><string>metal</string></array>
-  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
   <key>UIUserInterfaceStyle</key><string>Dark</string>
   <key>UILaunchScreen</key><dict/>
 </dict>
