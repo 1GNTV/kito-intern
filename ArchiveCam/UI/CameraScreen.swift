@@ -32,6 +32,7 @@ struct CameraScreen: View {
         .foregroundStyle(ArchiveStyle.chalk)
         .onAppear { camera.select(profile); camera.start() }
         .onDisappear { camera.stop() }
+        .onChange(of: mode) { _, value in camera.setMode(value) }
         .onChange(of: zoom) { _, value in camera.setZoom(value) }
         .task(id: camera.status) {
             statusVisible = true
@@ -196,12 +197,21 @@ struct CameraScreen: View {
                         }
                     }
                 }
+                if let renderer = camera.renderer {
+                    Section {
+                        NavigationLink("Import photo") {
+                            PhotoImportView(renderer: renderer, profile: profile) { data, done in
+                                camera.savePhoto(data, completion: done)
+                            }
+                        }
+                    }
+                }
                 Section("Zoom") {
                     Slider(value: $zoom, in: 1...6, step: 0.1)
                         .accessibilityLabel("Zoom")
                 }
                 Section {
-                    Text("ArchiveCam 0.7 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
+                    Text("ArchiveCam 0.8 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
                         .font(.footnote)
                 }
             }

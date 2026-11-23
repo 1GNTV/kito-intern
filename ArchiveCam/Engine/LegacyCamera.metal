@@ -6,6 +6,31 @@ struct FilterUniforms {
 };
 constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge, filter::linear);
 
+// The compact measures only the part of the sensor visible in the 4:3 finder.
+// A single bright lamp occupies too little of this grid to put the camera in daylight.
+kernel void compactMeter(texture2d<float, access::read> source [[texture(0)]],
+                         device float2 &result [[buffer(0)]],
+                         uint lane [[thread_index_in_threadgroup]]) {
+    float2 size = float2(source.get_width(), source.get_height());
+    float2 uv = (float2(lane % 16u, lane / 16u) + 0.5) / 16.0;
+    float scale = (size.x / size.y) / (4.0 / 3.0);
+    uv = (uv - 0.5) * float2(min(1.0, 1.0/scale), min(1.0, scale)) + 0.5;
+    float y = dot(source.read(min(uint2(uv * size), uint2(size) - 1u)).rgb,
+                  float3(0.299, 0.587, 0.114));
+    threadgroup float2 samples[256];
+    samples[lane] = float2(smoothstep(0.44, 0.75, y), smoothstep(0.12, 0.42, y));
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (lane < stride) samples[lane] += samples[lane + stride];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0u) {
+        float2 mean = samples[0] / 256.0;
+        result.x = smoothstep(0.045, 0.23, mean.x) * smoothstep(0.24, 0.50, mean.y);
+        result.y = 1.0 - smoothstep(0.10, 0.48, mean.y);
+    }
+}
+
 float hash21(float2 p) {
     // Integer mixing retains per-pixel variation even after a long capture.
     uint2 coord = uint2(p);
@@ -49,7 +74,7 @@ float3 cameraResponse(float3 rgb, constant FilterUniforms &p) {
 }
 // A neutral grey stays on the grey axis. Mid-strength colours get a gentle
 // boost; already vivid colours retain their hue at the edge of the RGB gamut.
-float3 cameraColor(float3 rgb) {
+float3 cameraColor(float3 rgb, float daylight) {
     rgb = clamp(rgb, 0.0, 1.0);
     float y = dot(rgb, float3(0.299, 0.587, 0.114));
     float3 chroma = rgb - y;
@@ -60,12 +85,16 @@ float3 cameraColor(float3 rgb) {
     float warmth = smoothstep(0.0, 0.12, rgb.r - rgb.g) * smoothstep(0.0, 0.09, rgb.g - rgb.b);
     float gain = 1.0 + 0.24 * strength * (1.0 - 0.55 * warmth) * smoothstep(0.035, 0.17, y);
     float tone = 0.010 + 0.98 * y + 0.035 * (4.0 * y * (1.0 - y)) * (2.0 * y - 0.72);
+    // Change luminance, protecting hue and keeping the black/white endpoints.
+    float shade = smoothstep(0.02, 0.13, y) * (1.0 - smoothstep(0.22, 0.48, y));
+    float sun = smoothstep(0.36, 0.78, y) * (1.0 - smoothstep(0.91, 1.0, y));
+    tone = clamp(tone + daylight * (0.067 * sun - 0.022 * shade), 0.0, 1.0);
     float room = min((1.0 - tone) / max(high, 0.00001), tone / max(low, 0.00001));
     return clamp(tone + chroma * min(gain, room), 0.0, 1.0);
 }
 float3 sensorPixel(texture2d<float, access::sample> first,
                    texture2d<float, access::sample> second,
-                   constant FilterUniforms &p, uint2 gid, float2 size) {
+                   constant FilterUniforms &p, float2 scene, uint2 gid, float2 size) {
     float2 uv0 = (float2(gid) + 0.5) / size;
     float sourceAspect = float(first.get_width()) / first.get_height();
     float targetAspect = size.x/size.y;
@@ -103,7 +132,7 @@ float3 sensorPixel(texture2d<float, access::sample> first,
     // Charge from bright neighbours spreads close to a light/dark boundary.
     // A uniform bright sky has no local excess to spill.
     float3 spill = max(surround - max(centre, float3(0.72)), 0.0);
-    rgb += spill * p.encoding.w;
+    rgb += spill * (p.encoding.w + 0.16 * scene.y);
     rgb = cameraResponse(rgb,p);
     float y = dot(rgb,float3(0.299,0.587,0.114));
     // Sample colour at a reduced lattice, preserving full luminance resolution.
@@ -125,6 +154,8 @@ float3 sensorPixel(texture2d<float, access::sample> first,
     float2 cbcr = float2((low.b-lowY)*0.564,(low.r-lowY)*0.713);
     float gain = sqrt(clamp(p.timing.y,1.0,16.0));
     float darkness = 0.3 + 1.4*pow(1.0-clamp(y,0.0,1.0),2.0);
+    // In a dark frame the high-gain colour path is coarser than its daylight path.
+    darkness *= 1.0 + 0.55 * scene.y * (1.0 - clamp(y, 0.0, 1.0));
     float2 seed = float2(gid)+p.timing.x;
     y += normalNoise(seed)*p.sensor.z*gain*darkness;
     float2 chromaSeed = floor(float2(gid)/p.encoding.xy)+p.timing.x;
@@ -133,7 +164,7 @@ float3 sensorPixel(texture2d<float, access::sample> first,
     y = round(y*levels)/levels;
     cbcr = round(cbcr*levels)/levels;
     rgb = float3(y+1.403*cbcr.y,y-0.344*cbcr.x-0.714*cbcr.y,y+1.773*cbcr.x);
-    return cameraColor(rgb);
+    return cameraColor(rgb, scene.x);
 }
 
 // Orthonormal 8-point cosine basis, indexed by frequency then position.
@@ -153,6 +184,7 @@ kernel void retroKernel(
     texture2d<float, access::sample> second [[texture(1)]],
     texture2d<float, access::write> output [[texture(2)]],
     constant FilterUniforms &p [[buffer(0)]],
+    constant float2 &scene [[buffer(1)]],
     uint2 gid [[thread_position_in_grid]],
     uint2 lane [[thread_position_in_threadgroup]]
 ) {
@@ -162,7 +194,7 @@ kernel void retroKernel(
         uint phase = (gid.y / 8u) & 1u;
         gid.y = (gid.y / 16u) * 16u + lane.y * 2u + phase;
     }
-    float3 rgb = sensorPixel(first, second, p, min(gid, size - 1u), float2(size));
+    float3 rgb = sensorPixel(first, second, p, scene, min(gid, size - 1u), float2(size));
     float y = dot(rgb, float3(0.299, 0.587, 0.114));
     threadgroup float3 a[8][8], b[8][8];
     uint u = lane.x, v = lane.y;

@@ -42,6 +42,7 @@ final class RenderEngine {
     let screenPipeline: MTLRenderPipelineState
     let ciContext: CIContext
     private let filterPipeline: MTLComputePipelineState
+    private let meterPipeline: MTLComputePipelineState
     private var textureCache: CVMetalTextureCache?
 
     init?() {
@@ -51,6 +52,8 @@ final class RenderEngine {
               let computeFunction = library.makeFunction(name: "retroKernel"),
               let vertex = library.makeFunction(name: "fullscreenVertex"),
               let fragment = library.makeFunction(name: "fullscreenFragment"),
+              let meterFunction = library.makeFunction(name: "compactMeter"),
+              let meter = try? gpu.makeComputePipelineState(function: meterFunction),
               let compute = try? gpu.makeComputePipelineState(function: computeFunction) else {
             return nil
         }
@@ -66,6 +69,7 @@ final class RenderEngine {
         self.queue = queue
         self.screenPipeline = screen
         self.filterPipeline = compute
+        self.meterPipeline = meter
         self.ciContext = CIContext(mtlDevice: gpu, options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
 
         var cache: CVMetalTextureCache?
@@ -125,8 +129,15 @@ final class RenderEngine {
             min(max(gain, 1), 16),
             second != nil && profile.prefersTemporalFields ? 1 : 0,
             profile.family == .camcorder ? 1 : 0)
-        guard let command = queue.makeCommandBuffer(),
-              let encoder = command.makeComputeCommandEncoder() else { return nil }
+        guard let command = queue.makeCommandBuffer() else { return nil }
+        var meter: MTLBuffer?
+        if profile.id == CameraProfile.ccd3MP.id {
+            guard let buffer = CompactMeter.encode(input: firstTexture, command: command,
+                                                  pipeline: meterPipeline) else { return nil }
+            meter = buffer
+        }
+        guard let encoder = command.makeComputeCommandEncoder() else { return nil }
+        CompactMeter.bind(meter, to: encoder)
         encoder.setComputePipelineState(filterPipeline)
         encoder.setTexture(firstTexture, index: 0)
         encoder.setTexture(secondTexture, index: 1)
@@ -144,11 +155,17 @@ final class RenderEngine {
         return SimulatedFrame(pixelBuffer: output, metalTexture: outputRef)
     }
 
-    func processStill(_ data: Data, profile: CameraProfile, gain: Float = 1) -> Data? {
+    func processStill(_ data: Data, profile: CameraProfile, gain: Float = 1,
+                      cropAnchor: CGPoint? = nil) -> Data? {
         guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
             return nil
         }
-        let extent = image.extent.integral
+        let bounds = image.extent.integral
+        let extent = cropAnchor.map { anchor in
+            let topDown = StillFraming.rect(in: bounds.size, anchor: anchor)
+            return CGRect(x: bounds.minX + topDown.minX, y: bounds.maxY - topDown.maxY,
+                          width: topDown.width, height: topDown.height)
+        } ?? bounds
         let width = Int(extent.width)
         let height = Int(extent.height)
         guard width > 0, height > 0,
@@ -156,7 +173,7 @@ final class RenderEngine {
               let destination = makePixelBuffer(width: profile.photoWidth, height: profile.photoHeight) else {
             return nil
         }
-        let shifted = image.transformed(
+        let shifted = image.cropped(to: extent).transformed(
             by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
         )
         ciContext.render(

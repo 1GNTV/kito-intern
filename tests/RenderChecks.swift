@@ -14,12 +14,19 @@ struct RenderChecks {
         }
         precondition(CameraProfile.miniDV03.photoWidth == 768 && CameraProfile.miniDV03.photoHeight == 576)
         precondition(CameraProfile.compact02.videoWidth == 320)
+        let portraitSize = CGSize(width: 1536, height: 2048)
+        precondition(StillFraming.rect(in: portraitSize, anchor: StillFraming.importAnchor)
+                     == CGRect(x: 0, y: 224, width: 1536, height: 1152))
+        precondition(StillFraming.rect(in: portraitSize, anchor: CGPoint(x: 1, y: 1)).maxY == 2048)
+        precondition(StillFraming.rect(in: CGSize(width: 2000, height: 1200),
+                                      anchor: .zero).size == CGSize(width: 1600, height: 1200))
         guard let device = MTLCreateSystemDefaultDevice() else {
             print("GPU runtime tests SKIPPED: runner exposes no Metal device")
             return
         }
         let library = try device.makeLibrary(URL: URL(fileURLWithPath: "/tmp/archivecam-test.metallib"))
         let pipeline = try device.makeComputePipelineState(function: library.makeFunction(name: "retroKernel")!)
+        let meterPipeline = try device.makeComputePipelineState(function: library.makeFunction(name: "compactMeter")!)
         let queue = device.makeCommandQueue()!
         let width = 320, height = 240
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
@@ -38,7 +45,7 @@ struct RenderChecks {
         pixels.withUnsafeBytes {
             input.replace(region: MTLRegionMake2D(0,0,width,height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width*4)
         }
-        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true, quantisation: Float? = nil) throws -> [UInt8] {
+        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true, quantisation: Float? = nil, metering: Bool = true) throws -> [UInt8] {
             let output = device.makeTexture(descriptor: desc)!
             var recipe = profile.recipe
             if !aperture { recipe.optics.y = 0 }
@@ -47,7 +54,13 @@ struct RenderChecks {
             recipe.sensor.y = Float(height)
             recipe.timing = SIMD4(42,gain,0,profile.family == .camcorder ? 1 : 0)
             let command = queue.makeCommandBuffer()!
+            var meter: MTLBuffer?
+            if metering && profile.id == CameraProfile.ccd3MP.id {
+                meter = CompactMeter.encode(input: source ?? input, command: command, pipeline: meterPipeline)
+                precondition(meter != nil)
+            }
             let encoder = command.makeComputeCommandEncoder()!
+            CompactMeter.bind(meter, to: encoder)
             encoder.setComputePipelineState(pipeline)
             encoder.setTexture(source ?? input,index:0)
             encoder.setTexture(source ?? input,index:1)
@@ -107,6 +120,20 @@ struct RenderChecks {
         }
         precondition(stepContrast(cropped) > stepContrast(uncorrected) + 6,
                      "the SD luma contour must retain an edge across the chroma footprint")
+        // Bright buildings and shaded foliage should separate in daylight. Cb/Cr
+        // remain near zero on a grey target. Compare the same quantiser and seed.
+        let measured = try run(.startup, gain: 1, source: portrait)
+        let unmetered = try run(.startup, gain: 1, source: portrait, metering: false)
+        func mean(_ image: [UInt8], x: Int, channel: Int = 0) -> Double {
+            var sum = 0
+            for row in 80..<160 {
+                for col in x..<(x+32) { sum += Int(image[(row*width+col)*4+channel]) }
+            }
+            return Double(sum) / (80*32)
+        }
+        precondition(mean(measured, x: 40) < mean(unmetered, x: 40) - 1)
+        precondition(mean(measured, x: 200) > mean(unmetered, x: 200) + 3)
+        precondition(abs(mean(measured, x: 200) - mean(measured, x: 200, channel: 2)) < 2)
         // A grey reference must remain neutral while a blue sky and a warm lamp
         // remain distinct. Average patches to exclude the simulated sensor noise.
         let patches: [[UInt8]] = [[140,140,140], [55,85,220], [215,140,60]]

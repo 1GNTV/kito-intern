@@ -41,7 +41,7 @@ struct CameraProfile: Identifiable, Equatable {
         id: "ccd3mp", name: "COMPACT CCD 3MP", era: "2004 / CCD",
         family: .compact, descriptor: "3 MP compact still camera / natural colour JPEG",
         photoWidth: 2048, photoHeight: 1536, videoWidth: 640, videoHeight: 480,
-        videoFPS: 15, prefersTemporalFields: false, jpegQuality: 0.83,
+        videoFPS: 15, prefersTemporalFields: false, jpegQuality: 0.82,
         saturation: 1.04, contrast: 1.02, warmth: 0,
         sensorNoise: 0.006, opticalSoftness: 0.30, highlightBloom: 0.10,
         chromaMisregistration: 0.15, cornerFalloff: 0.045
@@ -99,7 +99,7 @@ struct CameraProfile: Identifiable, Equatable {
                 sensor: SIMD4(0, 0, sensorNoise, 0.003),
                 optics: SIMD4(opticalSoftness, 0.38, chromaMisregistration, cornerFalloff),
                 tone: SIMD4(0.002, 1.07, 1.01, 0.98),
-                red: SIMD4(1.012, -0.008, -0.004, 0.18),
+                red: SIMD4(1.012, -0.008, -0.004, 0.27),
                 green: SIMD4(-0.004, 1.012, -0.008, 0),
                 blue: SIMD4(-0.005, -0.013, 1.018, 0),
                 encoding: SIMD4(2, 2, 255, highlightBloom), timing: .zero)

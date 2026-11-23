@@ -36,6 +36,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private var pendingField: CMSampleBuffer?
     private var samplingOrigin: CMTime = .invalid
     private var cadenceSampler = CadenceSampler()
+    private var captureMode: CaptureMode = .photo
     private var isFlashEnabled = false
     private var photoProfile: CameraProfile?
     private var photoGain: Float = 1
@@ -152,23 +153,30 @@ final class CaptureEngine: NSObject, ObservableObject,
         cadenceSampler.reset()
         guard let camera else { return }
 
-        // Use a 30 fps source for progressive modes; select presentation slots below.
-        // 20p and 25p may be uneven when the sensor cannot deliver the requested rate.
         let desired = activeProfile.prefersTemporalFields ? 50.0 : Double(activeProfile.videoFPS)
-        let supported = camera.activeFormat.videoSupportedFrameRateRanges.contains {
-            $0.minFrameRate <= desired && $0.maxFrameRate >= desired
+        let ranges = camera.activeFormat.videoSupportedFrameRateRanges
+        let rangeForRate: (Double) -> AVFrameRateRange? = { rate in
+            ranges.filter { $0.minFrameRate <= rate && $0.maxFrameRate >= rate }
+                .max { $0.maxFrameDuration < $1.maxFrameDuration }
         }
-        let rate = supported ? desired : 30.0
-        let rateIsSupported = camera.activeFormat.videoSupportedFrameRateRanges.contains {
-            $0.minFrameRate <= rate && $0.maxFrameRate >= rate
-        }
-        fiftyFPSActive = supported && desired == 50.0
-        if rateIsSupported {
+        let preferred = rangeForRate(desired)
+        let rate = preferred == nil ? 30.0 : desired
+        fiftyFPSActive = preferred != nil && desired == 50.0
+        if let range = preferred ?? rangeForRate(rate) {
             do {
                 try camera.lockForConfiguration()
-                let duration = CMTime(value: 1, timescale: CMTimeScale(Int32(rate)))
+                let duration = CMTime(value: 1, timescale: CMTimeScale(rate))
+                let slowStill = captureMode == .photo && activeProfile.id == CameraProfile.ccd3MP.id
+                let longest = slowStill ? max(duration, min(CMTime(value: 1, timescale: 8),
+                                                            range.maxFrameDuration)) : duration
                 camera.activeVideoMinFrameDuration = duration
-                camera.activeVideoMaxFrameDuration = duration
+                camera.activeVideoMaxFrameDuration = longest
+                if camera.isExposureModeSupported(.continuousAutoExposure) {
+                    camera.exposureMode = .continuousAutoExposure
+                    camera.activeMaxExposureDuration = slowStill
+                        ? max(camera.activeFormat.minExposureDuration,
+                              min(longest, camera.activeFormat.maxExposureDuration)) : .invalid
+                }
                 if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                     camera.whiteBalanceMode = .continuousAutoWhiteBalance
                 }
@@ -212,6 +220,14 @@ final class CaptureEngine: NSObject, ObservableObject,
             self.activeProfile = profile
             self.configureFrameRate()
             self.updateStatus("PROFILE: \(profile.name)")
+        }
+    }
+
+    func setMode(_ mode: CaptureMode) {
+        captureQueue.async {
+            guard self.recorder == nil, self.captureMode != mode else { return }
+            self.captureMode = mode
+            self.configureFrameRate()
         }
     }
 
@@ -408,20 +424,24 @@ final class CaptureEngine: NSObject, ObservableObject,
         }
     }
 
-    private func savePhoto(_ data: Data) {
+    func savePhoto(_ data: Data, completion: ((Bool, String) -> Void)? = nil) {
+        func finish(_ success: Bool, _ message: String) {
+            DispatchQueue.main.async {
+                self.status = message
+                completion?(success, message)
+            }
+        }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
-                self.updateStatus("PHOTOS PERMISSION DENIED")
+                finish(false, "PHOTOS PERMISSION DENIED")
                 return
             }
             PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetCreationRequest.forAsset()
                 request.addResource(with: .photo, data: data, options: nil)
             } completionHandler: { saved, error in
-                self.updateStatus(
-                    saved ? "PHOTO SAVED TO PHOTOS" :
-                        "SAVE FAILED: \(error?.localizedDescription ?? "Unknown")"
-                )
+                finish(saved, saved ? "PHOTO SAVED TO PHOTOS" :
+                           "SAVE FAILED: \(error?.localizedDescription ?? "Unknown")")
             }
         }
     }

@@ -25,7 +25,7 @@ jobs:
         run: |
           xcrun -sdk macosx metal -c ArchiveCam/Engine/LegacyCamera.metal -o /tmp/archivecam-test.air
           xcrun -sdk macosx metallib /tmp/archivecam-test.air -o /tmp/archivecam-test.metallib
-          swiftc ArchiveCam/Models/CameraProfile.swift ArchiveCam/Models/ImagingRecipe.swift tests/RenderChecks.swift -o /tmp/archivecam-render-tests
+          swiftc ArchiveCam/Models/{CameraProfile,ImagingRecipe,StillFraming}.swift ArchiveCam/Engine/CompactMeter.swift tests/RenderChecks.swift -o /tmp/archivecam-render-tests
           /tmp/archivecam-render-tests
       - name: Install XcodeGen
         run: brew install xcodegen

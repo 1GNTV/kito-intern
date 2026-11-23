@@ -33,13 +33,15 @@ Each `CameraProfile` describes image-response and capture choices. It is **not**
 
 An iPhone's lens, illuminant, flash, sensor architecture, tone mapping and microphone cannot be perfectly replaced in software. The first implementation receives a processed YUV/BGRA preview feed; it does not magically recover scene-referred RAW video. MiniDV's native DV25 DCT codec is also **not** encoded here: the file is H.264 MP4 with the geometry and some temporal characteristics of DV. Audio is recorded from the real microphone as AAC but is not yet measured/equalized to a particular camcorder. Photograph effects are stronger when validated from a reference camera; the parameter values here are experimental defaults.
 
-### Current output (ArchiveCam 0.7)
+### Current output (ArchiveCam 0.8)
 
 ArchiveCam opens in landscape and supports either horizontal grip. The finder and files use 4:3.
 The grade keeps neutral subjects neutral and gently boosts middle-strength colours. The right-hand grip holds the shutter, photo/video selector and zoom rocker.
 The live finder, JPEG and movie share an 8×8 DCT encode/decode stage with separate luma and colour quantisation. The movie is delivered as H.264 at 1.4 Mb/s for MiniDV, 980 kb/s for Compact 04 and 280 kb/s for Pocket CCD.
 Video uses a mono microphone response with profile-specific bandwidth and mild peak compression.
 Compact CCD 3MP opens by default and uses a dedicated still exposure. Its 2048×1536 format takes the Nikon COOLPIX 3200 as an example; the colour response is an artistic interpretation. The profile uses gentler quantisation to retain sky gradients.
+Compact CCD 3MP measures 256 points inside the 4:3 frame on the GPU. Lit scenes get more separation between shade and diffuse whites. In darker scenes the same meter instead increases shadow noise and local light spread. Compact still mode allows automatic exposure up to 1/8 second when the current capture format supports it. Video uses its selected frame cadence.
+Choose **Camera settings → Import photo** to place an existing image in the 4:3 frame. Drag the source, develop it with the selected camera profile, then save the resulting JPEG.
 MiniDV 03 remains selectable. Its JPEG with flash off captures the processed finder frame.
 With flash on it uses a separate still exposure. PAL is delivered as a 768×576
 square-pixel image in a JPEG or H.264 file.
