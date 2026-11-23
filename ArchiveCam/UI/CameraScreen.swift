@@ -309,7 +309,7 @@ struct CameraScreen: View {
                     ShutterCap(video: mode == .video, recording: camera.isRecording)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ShutterPress())
                 .disabled(!camera.isReady)
                 .accessibilityLabel(mode == .photo ? "Take photograph" :
                                     (camera.isRecording ? "Stop video" : "Record video"))

@@ -69,3 +69,12 @@ struct ShutterCap: View {
         .accessibilityHidden(true)
     }
 }
+
+struct ShutterPress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .offset(y: configuration.isPressed ? 2 : 0)
+            .brightness(configuration.isPressed ? -0.05 : 0)
+    }
+}

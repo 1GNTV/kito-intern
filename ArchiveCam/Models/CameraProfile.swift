@@ -84,7 +84,7 @@ struct CameraProfile: Identifiable, Equatable {
         if id == "compact02" {
             return ImagingRecipe(
                 sensor: SIMD4(0, 0, 0.011, 0.009),
-                optics: SIMD4(0.65, 0.48, 0.6, 0.11),
+                optics: SIMD4(0.34, 0.92, 0.6, 0.11),
                 tone: SIMD4(0.009, 1.30, 1.06, 0.83),
                 red: SIMD4(1.13, -0.09, -0.04, 0),
                 green: SIMD4(-0.04, 1.08, -0.04, 0),
@@ -94,7 +94,7 @@ struct CameraProfile: Identifiable, Equatable {
         } else if family == .compact {
             return ImagingRecipe(
                 sensor: SIMD4(0, 0, 0.008, 0.006),
-                optics: SIMD4(0.32, 0.70, 0.25, 0.06),
+                optics: SIMD4(0.22, 0.90, 0.25, 0.06),
                 tone: SIMD4(0.005, 1.18, 1.04, 0.90),
                 red: SIMD4(1.07, -0.05, -0.02, 0),
                 green: SIMD4(-0.025, 1.05, -0.025, 0),
@@ -104,8 +104,8 @@ struct CameraProfile: Identifiable, Equatable {
         }
         return ImagingRecipe(
             sensor: SIMD4(0, 0, 0.010, 0.008),
-            optics: SIMD4(0.90, 0.08, 0.20, 0.035),
-            tone: SIMD4(0.010, 1.32, 1.07, 0.80),
+            optics: SIMD4(0.26, 1.14, 0.23, 0.070),
+            tone: SIMD4(0.005, 1.18, 1.07, 0.86),
             red: SIMD4(0.92, 0.06, 0.02, 0),
             green: SIMD4(0.02, 0.97, 0.01, 0),
             blue: SIMD4(0.02, 0.055, 0.925, 0),

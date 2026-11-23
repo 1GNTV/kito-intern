@@ -37,9 +37,10 @@ struct RenderChecks {
         pixels.withUnsafeBytes {
             input.replace(region: MTLRegionMake2D(0,0,width,height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width*4)
         }
-        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil) throws -> [UInt8] {
+        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true) throws -> [UInt8] {
             let output = device.makeTexture(descriptor: desc)!
             var recipe = profile.recipe
+            if !aperture { recipe.optics.y = 0 }
             recipe.sensor.x = Float(width)
             recipe.sensor.y = Float(height)
             recipe.timing = SIMD4(42,gain,0,profile.family == .camcorder ? 1 : 0)
@@ -94,6 +95,16 @@ struct RenderChecks {
             let right = Int(cropped[(y*width+240)*4])
             precondition(left < 120 && right > left+60 && right < 240, "portrait crop, scale or orientation")
         }
+        let uncorrected = try run(.miniDV03, gain: 1, source: portrait, aperture: false)
+        func stepContrast(_ image: [UInt8]) -> Double {
+            let total = (16..<224).reduce(0) { sum, row in
+                let offset = (row * width + 159) * 4
+                return sum + Int(image[offset+4]) - Int(image[offset])
+            }
+            return Double(total) / 208
+        }
+        precondition(stepContrast(cropped) > stepContrast(uncorrected) + 6,
+                     "the SD luma contour must retain an edge across the chroma footprint")
         print("GPU tests passed; pocket/compact MAE \(distance(pocket,compact)), pocket/DV MAE \(distance(pocket,dv)); four renders wall ms \(Date().timeIntervalSince(start)*1000)")
         for _ in 0..<10 { _ = try run(.compact02,gain:1) }
         print("Synthetic GPU workload complete. Not an iPhone realtime performance measurement.")

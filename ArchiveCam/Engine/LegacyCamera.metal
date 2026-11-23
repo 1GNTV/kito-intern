@@ -7,9 +7,13 @@ struct FilterUniforms {
 constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge, filter::linear);
 
 float hash21(float2 p) {
-    p = fract(p * float2(123.34, 345.45));
-    p += dot(p, p + 34.345);
-    return fract(p.x * p.y);
+    // Integer mixing retains per-pixel variation even after a long capture.
+    uint2 coord = uint2(p);
+    uint bits = coord.x * 0x85ebca6bu + coord.y * 0xc2b2ae35u + 0x9e3779b9u;
+    bits ^= bits >> 16;
+    bits *= 0x7feb352du;
+    bits ^= bits >> 15;
+    return float(bits >> 8) / 16777216.0;
 }
 float normalNoise(float2 p) {
     return sqrt(-2.0 * log(max(hash21(p), 0.0001))) *
@@ -36,7 +40,11 @@ float3 cameraResponse(float3 rgb, constant FilterUniforms &p) {
     rgb = max(float3(dot(p.red.xyz, rgb), dot(p.green.xyz, rgb),
                      dot(p.blue.xyz, rgb)), 0.0);
     rgb = max(rgb * p.tone.y - p.tone.x, 0.0);
-    rgb = min(rgb, p.tone.w) / p.tone.w;
+    // Compress only the brightest part of the response. This leaves a band
+    // of detail between the diffuse highlights and the final sensor clip.
+    float3 level = rgb / p.tone.w;
+    float3 excess = max(level - 0.67, 0.0);
+    rgb = min(min(level, 0.67) + excess / (1.0 + 1.42 * excess), 1.0);
     return pow(rgb, float3(p.tone.z / 2.2));
 }
 // Gentle print-like response in display space, after the sensor and colour encoding.
@@ -46,9 +54,16 @@ float3 memoryColor(float3 rgb) {
     float3 chroma = rgb - y;
     float strongest = max(rgb.r, max(rgb.g, rgb.b)) - min(rgb.r, min(rgb.g, rgb.b));
     float colourGain = 0.93 - 0.14 * smoothstep(0.18, 0.86, strongest);
-    float tone = 0.022 + 0.951 * y + 0.018 * (4.0 * y * (1.0 - y));
-    float light = smoothstep(0.26, 0.92, y);
-    float3 tint = mix(float3(-0.002, 0.001, 0.004), float3(0.016, 0.005, -0.017), light);
+    // Restrict the palette locally: leafy greens move toward olive, sky blues
+    // toward cyan. A near-neutral patch receives only the tonal balance.
+    float foliage = max(0.0, min(rgb.g - rgb.r, rgb.g - rgb.b));
+    float sky = max(0.0, min(rgb.b - rgb.r, rgb.b - rgb.g));
+    chroma += foliage * float3(0.35, -0.08, -0.24) + sky * float3(-0.14, 0.20, -0.14);
+    float mid = 4.0 * y * (1.0 - y);
+    float tone = 0.018 + 0.96 * y + 0.064 * mid * (2.0 * y - 0.85);
+    float light = smoothstep(0.22, 0.83, y);
+    float3 tint = mix(float3(-0.004, 0.006, 0.015), float3(0.040, 0.013, -0.035), light);
+    tint *= 1.0 - 0.50 * smoothstep(0.90, 1.0, y);
     return clamp(tone + chroma * colourGain + tint, 0.0, 1.0);
 }
 kernel void retroKernel(
@@ -85,7 +100,11 @@ kernel void retroKernel(
     float3 surround = mix(horizontal, vertical, camcorder ? 0.38 : 0.50);
     float radius = length((uv0 - 0.5)*1.4142);
     float3 rgb = mix(centre, surround, min(0.8, p.optics.x * (0.55 + radius*0.45)));
-    rgb += clamp(centre-surround, -0.16, 0.16)*p.optics.y;
+    // Aperture correction follows luminance transitions alone. The dead band
+    // leaves flat sky and fine sensor noise out of the sharpening path.
+    float edge = dot(centre - surround, float3(0.299, 0.587, 0.114));
+    float contour = sign(edge) * min(max(abs(edge) - 0.004, 0.0), 0.09);
+    rgb += contour * p.optics.y;
     float2 radial = (uv0-0.5)*footprint*p.optics.z;
     rgb.r = mix(rgb.r, field ? second.sample(linearSampler,uv+radial).r : first.sample(linearSampler,uv+radial).r, 0.25);
     rgb.b = mix(rgb.b, field ? second.sample(linearSampler,uv-radial).b : first.sample(linearSampler,uv-radial).b, 0.25);
