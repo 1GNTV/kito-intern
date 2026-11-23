@@ -41,9 +41,9 @@ struct CameraProfile: Identifiable, Equatable {
         id: "ccd3mp", name: "COMPACT CCD 3MP", era: "2004 / CCD",
         family: .compact, descriptor: "3 MP compact still camera / natural colour JPEG",
         photoWidth: 2048, photoHeight: 1536, videoWidth: 640, videoHeight: 480,
-        videoFPS: 15, prefersTemporalFields: false, jpegQuality: 0.82,
+        videoFPS: 15, prefersTemporalFields: false, jpegQuality: 0.92,
         saturation: 1.04, contrast: 1.02, warmth: 0,
-        sensorNoise: 0.006, opticalSoftness: 0.30, highlightBloom: 0.10,
+        sensorNoise: 0.0045, opticalSoftness: 0.30, highlightBloom: 0.10,
         chromaMisregistration: 0.15, cornerFalloff: 0.045
     )
     static let startup = ccd3MP
@@ -58,7 +58,7 @@ struct CameraProfile: Identifiable, Equatable {
         videoWidth: 640, videoHeight: 480,
         videoFPS: 15,
         prefersTemporalFields: false,
-        jpegQuality: 0.77,
+        jpegQuality: 0.88,
         saturation: 1.06, contrast: 1.09, warmth: 0.015,
         sensorNoise: 0.014, opticalSoftness: 0.26,
         highlightBloom: 0.12, chromaMisregistration: 0.32, cornerFalloff: 0.14
@@ -74,7 +74,7 @@ struct CameraProfile: Identifiable, Equatable {
         videoWidth: 768, videoHeight: 576,
         videoFPS: 25,
         prefersTemporalFields: true,
-        jpegQuality: 0.84,
+        jpegQuality: 0.90,
         saturation: 0.92, contrast: 1.12, warmth: -0.013,
         sensorNoise: 0.023, opticalSoftness: 0.45,
         highlightBloom: 0.21, chromaMisregistration: 0.48, cornerFalloff: 0.08
@@ -87,7 +87,7 @@ struct CameraProfile: Identifiable, Equatable {
         descriptor: "2 MP JPEG / QVGA 15p / coarse colour, clipped highlights, compact optics",
         photoWidth: 1600, photoHeight: 1200,
         videoWidth: 320, videoHeight: 240, videoFPS: 15,
-        prefersTemporalFields: false, jpegQuality: 0.61,
+        prefersTemporalFields: false, jpegQuality: 0.82,
         saturation: 1.18, contrast: 1.22, warmth: 0.018,
         sensorNoise: 0.030, opticalSoftness: 0.7,
         highlightBloom: 0.22, chromaMisregistration: 0.45, cornerFalloff: 0.12
@@ -96,10 +96,10 @@ struct CameraProfile: Identifiable, Equatable {
     var recipe: ImagingRecipe {
         if id == Self.ccd3MP.id {
             return ImagingRecipe(
-                sensor: SIMD4(0, 0, sensorNoise, 0.003),
+                sensor: SIMD4(0, 0, sensorNoise, 0.0018),
                 optics: SIMD4(opticalSoftness, 0.38, chromaMisregistration, cornerFalloff),
                 tone: SIMD4(0.002, 1.07, 1.01, 0.98),
-                red: SIMD4(1.012, -0.008, -0.004, 0.27),
+                red: SIMD4(1.012, -0.008, -0.004, 0.48),
                 green: SIMD4(-0.004, 1.012, -0.008, 0),
                 blue: SIMD4(-0.005, -0.013, 1.018, 0),
                 encoding: SIMD4(2, 2, 255, highlightBloom), timing: .zero)
@@ -109,17 +109,17 @@ struct CameraProfile: Identifiable, Equatable {
                 sensor: SIMD4(0, 0, 0.011, 0.009),
                 optics: SIMD4(0.34, 0.92, 0.6, 0.11),
                 tone: SIMD4(0.009, 1.30, 1.06, 0.83),
-                red: SIMD4(1.13, -0.09, -0.04, 1.50),
+                red: SIMD4(1.13, -0.09, -0.04, 0.82),
                 green: SIMD4(-0.04, 1.08, -0.04, 0),
                 blue: SIMD4(-0.035, -0.105, 1.14, 0),
-                encoding: SIMD4(2, 2, 112, 0.16),
+                encoding: SIMD4(2, 2, 165, 0.16),
                 timing: .zero)
         } else if family == .compact {
             return ImagingRecipe(
                 sensor: SIMD4(0, 0, 0.008, 0.006),
                 optics: SIMD4(0.22, 0.90, 0.25, 0.06),
                 tone: SIMD4(0.005, 1.18, 1.04, 0.90),
-                red: SIMD4(1.07, -0.05, -0.02, 0.82),
+                red: SIMD4(1.07, -0.05, -0.02, 0.64),
                 green: SIMD4(-0.025, 1.05, -0.025, 0),
                 blue: SIMD4(-0.025, -0.04, 1.065, 0),
                 encoding: SIMD4(2, 2, 192, 0.07),
@@ -129,7 +129,7 @@ struct CameraProfile: Identifiable, Equatable {
             sensor: SIMD4(0, 0, 0.010, 0.008),
             optics: SIMD4(0.26, 1.14, 0.23, 0.070),
             tone: SIMD4(0.005, 1.18, 1.07, 0.86),
-            red: SIMD4(0.994, 0.005, 0.001, 1.30),
+            red: SIMD4(0.994, 0.005, 0.001, 1.0),
             green: SIMD4(0.003, 0.996, 0.001, 0),
             blue: SIMD4(0.001, 0.008, 0.991, 0),
             encoding: SIMD4(2, 2, 219, 0.26),

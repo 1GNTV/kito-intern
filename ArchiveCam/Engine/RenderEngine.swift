@@ -143,7 +143,6 @@ final class RenderEngine {
         encoder.setTexture(secondTexture, index: 1)
         encoder.setTexture(outputTexture, index: 2)
         encoder.setBytes(&uniforms, length: MemoryLayout<ImagingRecipe>.stride, index: 0)
-        // Complete 8×8 transform blocks also cover partial edge tiles.
         encoder.dispatchThreadgroups(
             MTLSize(width: (outputTexture.width + 7) / 8, height: (outputTexture.height + 7) / 8, depth: 1),
             threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 1)

@@ -5,7 +5,7 @@ struct ImagingRecipe {
     var sensor: SIMD4<Float>   // native sampling width/height, luminance/chroma noise
     var optics: SIMD4<Float>   // softness, aperture correction, lateral CA, falloff
     var tone: SIMD4<Float>     // black pedestal, exposure scale, gamma, clipping threshold
-    var red: SIMD4<Float>      // red response xyz, block quantisation scale w
+    var red: SIMD4<Float>      // red response xyz, subsampled chroma contribution w
     var green: SIMD4<Float>
     var blue: SIMD4<Float>
     var encoding: SIMD4<Float> // chroma block width/height, quantisation levels, highlight spread

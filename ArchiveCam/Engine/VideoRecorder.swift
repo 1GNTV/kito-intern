@@ -24,7 +24,9 @@ final class VideoRecorder {
         guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else {
             return nil
         }
-        let bitRate = profile.family == .camcorder ? 1_400_000 : (profile.id == "compact02" ? 280_000 : 980_000)
+        let samplesPerSecond = profile.videoWidth * profile.videoHeight * profile.videoFPS
+        let bitsPerPixel = profile.family == .camcorder ? 0.44 : 0.56
+        let bitRate = Int(Double(samplesPerSecond) * bitsPerPixel)
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: profile.videoWidth,
@@ -32,7 +34,7 @@ final class VideoRecorder {
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: bitRate,
                 AVVideoExpectedSourceFrameRateKey: profile.videoFPS,
-                AVVideoMaxKeyFrameIntervalKey: profile.family == .compact ? 1 : profile.videoFPS
+                AVVideoMaxKeyFrameIntervalKey: profile.videoFPS
             ]
         ]
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)

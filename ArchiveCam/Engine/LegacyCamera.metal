@@ -151,7 +151,9 @@ float3 sensorPixel(texture2d<float, access::sample> first,
     }
     float3 low = cameraResponse(chromaSample,p);
     float lowY = dot(low,float3(0.299,0.587,0.114));
-    float2 cbcr = float2((low.b-lowY)*0.564,(low.r-lowY)*0.713);
+    float2 fullChroma = float2(rgb.b-y, rgb.r-y);
+    float2 sampledChroma = float2(low.b-lowY, low.r-lowY);
+    float2 cbcr = mix(fullChroma, sampledChroma, p.red.w) * float2(0.564, 0.713);
     float gain = sqrt(clamp(p.timing.y,1.0,16.0));
     float darkness = 0.3 + 1.4*pow(1.0-clamp(y,0.0,1.0),2.0);
     // In a dark frame the high-gain colour path is coarser than its daylight path.
@@ -167,66 +169,19 @@ float3 sensorPixel(texture2d<float, access::sample> first,
     return cameraColor(rgb, scene.x);
 }
 
-// Orthonormal 8-point cosine basis, indexed by frequency then position.
-constant float basis[64] = {
-    0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f,
-    0.49039264f, 0.41573481f, 0.27778512f, 0.09754516f, -0.09754516f, -0.27778512f, -0.41573481f, -0.49039264f,
-    0.46193977f, 0.19134172f, -0.19134172f, -0.46193977f, -0.46193977f, -0.19134172f, 0.19134172f, 0.46193977f,
-    0.41573481f, -0.09754516f, -0.49039264f, -0.27778512f, 0.27778512f, 0.49039264f, 0.09754516f, -0.41573481f,
-    0.35355339f, -0.35355339f, -0.35355339f, 0.35355339f, 0.35355339f, -0.35355339f, -0.35355339f, 0.35355339f,
-    0.27778512f, -0.49039264f, 0.09754516f, 0.41573481f, -0.41573481f, -0.09754516f, 0.49039264f, -0.27778512f,
-    0.19134172f, -0.46193977f, 0.46193977f, -0.19134172f, -0.19134172f, 0.46193977f, -0.46193977f, 0.19134172f,
-    0.09754516f, -0.27778512f, 0.41573481f, -0.49039264f, 0.49039264f, -0.41573481f, 0.27778512f, -0.09754516f
-};
-
 kernel void retroKernel(
     texture2d<float, access::sample> first [[texture(0)]],
     texture2d<float, access::sample> second [[texture(1)]],
     texture2d<float, access::write> output [[texture(2)]],
     constant FilterUniforms &p [[buffer(0)]],
     constant float2 &scene [[buffer(1)]],
-    uint2 gid [[thread_position_in_grid]],
-    uint2 lane [[thread_position_in_threadgroup]]
+    uint2 gid [[thread_position_in_grid]]
 ) {
     uint2 size = uint2(output.get_width(), output.get_height());
-    // Woven PAL frames have two source times. Transform each field separately.
-    if (p.timing.z > 0.5) {
-        uint phase = (gid.y / 8u) & 1u;
-        gid.y = (gid.y / 16u) * 16u + lane.y * 2u + phase;
-    }
-    float3 rgb = sensorPixel(first, second, p, scene, min(gid, size - 1u), float2(size));
-    float y = dot(rgb, float3(0.299, 0.587, 0.114));
-    threadgroup float3 a[8][8], b[8][8];
-    uint u = lane.x, v = lane.y;
-    a[v][u] = 255.0 * float3(y - 0.5, (rgb.b-y)*0.564, (rgb.r-y)*0.713);
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    float3 row = 0.0;
-    for (uint n=0; n<8; ++n) row += basis[u*8+n] * a[v][n];
-    b[v][u] = row;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    float3 coeff = 0.0;
-    for (uint n=0; n<8; ++n) coeff += basis[v*8+n] * b[n][u];
-
-    // Quantise actual coefficients; flat blocks keep their own average and
-    // sharp silhouettes retain low-frequency shape plus characteristic ringing.
-    float freq = float(u+v);
-    float luma = (u+v == 0u) ? 38.0 : 12.0 + 3.5*freq + 0.58*freq*freq;
-    float chroma = (u+v == 0u) ? 44.0 : min(210.0, 21.0 + 11.0*freq + 1.2*freq*freq);
-    float3 step = float3(luma, chroma, chroma) * p.red.w;
-    a[v][u] = round(coeff / step) * step;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    float3 column = 0.0;
-    for (uint k=0; k<8; ++k) column += basis[k*8+v] * a[k][u];
-    b[v][u] = column;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    float3 decoded = 0.0;
-    for (uint k=0; k<8; ++k) decoded += basis[k*8+u] * b[v][k];
-    decoded /= 255.0;
-    y = decoded.x + 0.5;
-    rgb = float3(y+1.402*decoded.z, y-0.344136*decoded.y-0.714136*decoded.z, y+1.772*decoded.y);
-    if (all(gid < size)) output.write(float4(clamp(rgb,0.0,1.0),1.0),gid);
+    if (any(gid >= size)) return;
+    // Preserve the sampled sensor image until the final JPEG or movie encode.
+    float3 rgb = sensorPixel(first, second, p, scene, gid, float2(size));
+    output.write(float4(rgb, 1.0), gid);
 }
 
 struct FullscreenVertex {

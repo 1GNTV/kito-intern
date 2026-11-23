@@ -45,11 +45,10 @@ struct RenderChecks {
         pixels.withUnsafeBytes {
             input.replace(region: MTLRegionMake2D(0,0,width,height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width*4)
         }
-        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true, quantisation: Float? = nil, metering: Bool = true) throws -> [UInt8] {
+        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true, metering: Bool = true) throws -> [UInt8] {
             let output = device.makeTexture(descriptor: desc)!
             var recipe = profile.recipe
             if !aperture { recipe.optics.y = 0 }
-            if let quantisation { recipe.red.w = quantisation }
             recipe.sensor.x = Float(width)
             recipe.sensor.y = Float(height)
             recipe.timing = SIMD4(42,gain,0,profile.family == .camcorder ? 1 : 0)
@@ -156,8 +155,7 @@ struct RenderChecks {
         }
         precondition(abs(patch(40,0)-patch(40,2)) < 3 && abs(patch(40,1)-patch(40,2)) < 3)
         precondition(patch(145,2) > patch(145,1)+70 && patch(250,0) > patch(250,2)+80)
-        // A gentle gradient should show stronger jumps at codec boundaries
-        // than inside blocks. Turning quantisation down removes the steps.
+        // A smooth sensor gradient should have no preferred eight-pixel boundaries.
         for y in 0..<height {
             for x in 0..<width {
                 let grey = UInt8(75 + x / 3)
@@ -179,11 +177,10 @@ struct RenderChecks {
             }
             return Double(border - interior) / Double(176*32)
         }
-        let compressed = try run(.miniDV03, gain: 1)
-        let fine = try run(.miniDV03, gain: 1, quantisation: 0.005)
-        precondition(blockContrast(compressed) > blockContrast(fine) + 1)
-        let compactGradient = try run(.startup, gain: 1)
-        precondition(blockContrast(compactGradient) < blockContrast(compressed))
+        for profile in CameraProfile.all {
+            let gradient = try run(profile, gain: 1)
+            precondition(abs(blockContrast(gradient)) < 0.55, "visible 8-pixel grid in \(profile.name)")
+        }
         print("GPU tests passed; pocket/compact MAE \(distance(pocket,compact)), pocket/DV MAE \(distance(pocket,dv)); four renders wall ms \(Date().timeIntervalSince(start)*1000)")
         for _ in 0..<10 { _ = try run(.compact02,gain:1) }
         print("Synthetic GPU workload complete. Not an iPhone realtime performance measurement.")

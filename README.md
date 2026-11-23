@@ -37,7 +37,7 @@ An iPhone's lens, illuminant, flash, sensor architecture, tone mapping and micro
 
 ArchiveCam opens in landscape and supports either horizontal grip. The finder and files use 4:3.
 The grade keeps neutral subjects neutral and gently boosts middle-strength colours. The right-hand grip holds the shutter, photo/video selector and zoom rocker.
-The live finder, JPEG and movie share an 8×8 DCT encode/decode stage with separate luma and colour quantisation. The movie is delivered as H.264 at 1.4 Mb/s for MiniDV, 980 kb/s for Compact 04 and 280 kb/s for Pocket CCD.
+The finder renders sensor colour, optics and luminance detail directly. Compression happens once when writing the JPEG or H.264 file. Movie bitrate scales with frame size and frame rate and the encoder can reuse detail between frames. The default 3 MP still profile exports at JPEG quality 0.92.
 The landscape finder takes the full available height. The default photo profile draws a 960×720 finder image. Tap FLASH for stills or LIGHT for a continuous video lamp. While the app is open on a compatible iPhone, Camera Control takes a photo or starts/stops a video. A light press and swipe adjusts zoom, with the actual lens factor displayed in the finder.
 Movies use a mono microphone with profile-specific bandwidth, a vocal presence band, soft peak limiting, a quiet signal-dependent preamp floor and a slow automatic level recovery after loud sounds. AAC is encoded at 48 kb/s for compact cameras and 80 kb/s for MiniDV.
 Compact CCD 3MP opens by default and uses a dedicated still exposure. Its 2048×1536 format takes the Nikon COOLPIX 3200 as an example; the colour response is an artistic interpretation. The profile uses gentler quantisation to retain sky gradients.
