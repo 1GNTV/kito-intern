@@ -1,15 +1,5 @@
 import SwiftUI
 
-private enum ArchiveStyle {
-    static let background = Color(red: 0.052, green: 0.057, blue: 0.063)
-    static let surface = Color(red: 0.088, green: 0.094, blue: 0.099)
-    static let line = Color(red: 0.23, green: 0.25, blue: 0.26)
-    static let chalk = Color(red: 0.91, green: 0.90, blue: 0.85)
-    static let muted = Color(red: 0.54, green: 0.57, blue: 0.57)
-    static let signal = Color(red: 0.76, green: 0.85, blue: 0.70)
-    static let recording = Color(red: 0.91, green: 0.27, blue: 0.22)
-}
-
 struct CameraScreen: View {
     @StateObject private var camera = CaptureEngine()
     @State private var profile = CameraProfile.miniDV03
@@ -38,19 +28,19 @@ struct CameraScreen: View {
                 } else {
                     VStack(spacing: 0) {
                         masthead
-                        deviceSelector.padding(.top, 21)
+                        deviceSelector.padding(.top, 10)
                         Spacer(minLength: 12)
                         finder.frame(maxHeight: geo.size.height * 0.48)
                         Spacer(minLength: 13)
                         controls
-                        footer.padding(.top, 18).padding(.bottom, 8)
+                        footer.padding(.top, 10).padding(.bottom, 8)
                     }
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 16)
             .padding(.top, 7)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(ArchiveStyle.background.ignoresSafeArea())
+            .background(CameraBody().ignoresSafeArea())
         }
         .onAppear {
             camera.select(profile)
@@ -64,35 +54,34 @@ struct CameraScreen: View {
     private var finder: some View {
         viewfinder
             .aspectRatio(4.0 / 3.0, contentMode: .fit)
+            .padding(6)
+            .background(.black, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.linearGradient(
+                colors: [.black, .white.opacity(0.29)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
             .accessibilityLabel("Simulated live camera preview")
             .onTapGesture { camera.refocus() }
     }
 
     private var masthead: some View {
-        HStack(alignment: .center) {
-            HStack(spacing: 9) {
-                Image(systemName: "circle.hexagongrid")
-                    .font(.system(size: 15, weight: .light))
-                    .foregroundStyle(ArchiveStyle.chalk)
-                Text("ARCHIVE / CAMERA")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .tracking(1.2)
-                    .foregroundStyle(ArchiveStyle.chalk)
-            }
+        HStack(spacing: 10) {
+            Text("ArchiveCam")
+                .font(.system(size: 24, weight: .heavy).width(.condensed).italic())
+                .tracking(-0.8)
             Spacer()
-            Text("ENGINE  04")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .tracking(0.8)
-                .foregroundStyle(ArchiveStyle.muted)
             Button { showingInfo = true } label: {
                 Image(systemName: "info.circle")
-                    .font(.system(size: 17, weight: .light))
-                    .foregroundStyle(ArchiveStyle.muted)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("About accuracy and limitations")
+            .accessibilityLabel("Camera information")
         }
+        .foregroundStyle(Color(white: 0.12))
+        .padding(.horizontal, 13)
+        .background(LinearGradient(colors: [
+            Color(red: 0.82, green: 0.80, blue: 0.74), Color(white: 0.67),
+            Color(red: 0.79, green: 0.78, blue: 0.73)
+        ], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.4), lineWidth: 1).allowsHitTesting(false))
     }
 
     private var deviceSelector: some View {
@@ -101,9 +90,10 @@ struct CameraScreen: View {
         } label: {
             HStack(spacing: 15) {
                 Image(systemName: profile.family == .compact ? "camera" : "video")
-                    .font(.system(size: 18, weight: .ultraLight))
+                    .font(.system(size: 16, weight: .semibold))
                     .frame(width: 32, height: 32)
-                    .foregroundStyle(ArchiveStyle.chalk)
+                    .foregroundStyle(ArchiveStyle.signal)
+                    .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
                 VStack(alignment: .leading, spacing: 5) {
                     Text(profile.name)
                         .font(.system(size: 19, weight: .medium, design: .monospaced))
@@ -120,9 +110,8 @@ struct CameraScreen: View {
                     .foregroundStyle(ArchiveStyle.muted)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 14)
-            .background(ArchiveStyle.surface)
-            .overlay(Rectangle().stroke(ArchiveStyle.line, lineWidth: 0.75))
+            .padding(.vertical, 9)
+            .modifier(CameraGlass(shape: RoundedRectangle(cornerRadius: 13)))
         }
         .buttonStyle(.plain)
         .disabled(camera.isRecording)
@@ -143,7 +132,7 @@ struct CameraScreen: View {
             VStack(spacing: 0) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("CAM  /  \(profile.id.uppercased())")
+                        Text(profile.family == .camcorder ? "▸ DV" : "CCD")
                         Text(mode == .video
                              ? "\(profile.videoWidth)×\(profile.videoHeight)  \(profile.videoFPS)P"
                              : "\(profile.photoWidth)×\(profile.photoHeight)  JPEG")
@@ -188,7 +177,7 @@ struct CameraScreen: View {
                 Spacer()
 
                 HStack {
-                    Text("CCD / AUTO AF")
+                    Text("AF  ·  \(String(format: "%.1f", zoom))×")
                     Spacer()
                     if profile.prefersTemporalFields && mode == .video {
                         Text(camera.hasFiftyFPS ? "50 FIELDS/S SOURCE" : "25P FALLBACK")
@@ -205,30 +194,32 @@ struct CameraScreen: View {
     }
 
     private var controls: some View {
-        VStack(spacing: 20) {
-            HStack(spacing: 0) {
+        VStack(spacing: 12) {
+            HStack(spacing: 3) {
                 ForEach(CaptureMode.allCases, id: \.self) { option in
-                    Button {
-                        guard !camera.isRecording else { return }
-                        mode = option
-                    } label: {
-                        VStack(spacing: 9) {
+                    Button { mode = option } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: option == .photo ? "camera.fill" : "video.fill")
                             Text(option.rawValue)
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .tracking(2.0)
-                                .foregroundStyle(
-                                    mode == option ? ArchiveStyle.chalk : ArchiveStyle.muted
-                                )
-                            Rectangle()
-                                .fill(mode == option ? ArchiveStyle.signal : .clear)
-                                .frame(width: 70, height: 2)
                         }
-                        .frame(width: 118)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundStyle(mode == option ? ArchiveStyle.chalk : ArchiveStyle.muted)
+                        .frame(maxWidth: .infinity, minHeight: 39)
+                        .background {
+                            if mode == option {
+                                Color.clear.modifier(CameraGlass(shape: Capsule()))
+                            }
+                        }
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .disabled(camera.isRecording)
+                    .accessibilityAddTraits(mode == option ? [.isSelected] : [])
                 }
             }
+            .padding(3)
+            .background(.black.opacity(0.60), in: Capsule())
 
             if mode == .video {
                 Menu {
@@ -265,10 +256,21 @@ struct CameraScreen: View {
             HStack(spacing: 16) {
                 Text("W")
                     .foregroundStyle(ArchiveStyle.muted)
-                Slider(value: $zoom, in: 1...6, step: 0.1)
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<21, id: \.self) { mark in
+                            Rectangle().fill(ArchiveStyle.muted.opacity(0.68))
+                                .frame(width: 1, height: mark.isMultiple(of: 4) ? 5 : 2)
+                            if mark < 20 { Spacer(minLength: 0) }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .accessibilityHidden(true)
+                    Slider(value: $zoom, in: 1...6, step: 0.1)
                     .tint(ArchiveStyle.chalk)
                     .onChange(of: zoom) { _, value in camera.setZoom(value) }
                     .accessibilityLabel("Camera zoom")
+                }
                 Text("T")
                     .foregroundStyle(ArchiveStyle.muted)
                 Text(String(format: "%.1f×", zoom))
@@ -304,24 +306,8 @@ struct CameraScreen: View {
                 .frame(maxWidth: .infinity)
 
                 Button(action: primaryAction) {
-                    ZStack {
-                        Circle()
-                            .stroke(ArchiveStyle.chalk, lineWidth: 2.5)
-                            .frame(width: 77, height: 77)
-                        if mode == .video {
-                            RoundedRectangle(cornerRadius: camera.isRecording ? 4 : 29)
-                                .fill(ArchiveStyle.recording)
-                                .frame(
-                                    width: camera.isRecording ? 27 : 58,
-                                    height: camera.isRecording ? 27 : 58
-                                )
-                        } else {
-                            Circle()
-                                .fill(ArchiveStyle.chalk)
-                                .frame(width: 61, height: 61)
-                        }
-                    }
-                    .frame(width: 86, height: 86)
+                    ShutterCap(video: mode == .video, recording: camera.isRecording)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!camera.isReady)
@@ -331,7 +317,7 @@ struct CameraScreen: View {
                 VStack(spacing: 8) {
                     Image(systemName: mode == .video ? "film.stack" : "photo")
                         .font(.system(size: 19, weight: .light))
-                    Text(mode == .video ? "MP4 / AAC" : "JPEG")
+                    Text(mode == .video ? "MONO / AAC" : "JPEG")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(ArchiveStyle.muted)
                 }
@@ -360,7 +346,7 @@ struct CameraScreen: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer()
-                Text("LOCAL CAPTURE")
+                Text("4:3")
             }
             .font(.system(size: 8, weight: .medium, design: .monospaced))
             .tracking(0.3)
@@ -370,7 +356,8 @@ struct CameraScreen: View {
 
     private var deviceSheet: some View {
         NavigationStack {
-            VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
                 ForEach(CameraProfile.all.indices, id: \.self) { index in
                     let device = CameraProfile.all[index]
                     Button {
@@ -411,7 +398,7 @@ struct CameraScreen: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer()
+                }
                 Text("EXPERIMENTAL PROFILES / NOT YET CALIBRATED")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(ArchiveStyle.muted)
@@ -434,13 +421,12 @@ struct CameraScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text("ENGINEERING, NOT A PRESET PACK.")
-                        .font(.system(size: 22, weight: .medium, design: .monospaced))
+                    Text("ArchiveCam 0.5")
+                        .font(.title2.bold())
                         .foregroundStyle(ArchiveStyle.chalk)
-                    Text("Each historical profile changes optics, noise, color and capture cadence. The live preview is processed using Metal; photographs are exported as JPEG, videos as H.264/AAC MP4.")
-                    Text("IMPORTANT: this is a physical-model prototype, not a measured replica. The coefficients have not yet been fitted to real 2000s camera reference captures. The iPhone flash, imaging pipeline and microphone remain limitations.")
-                    Text("PAL 50i uses two camera instants when 50fps capture is supported. The live preview shows the individual source instants; the recorded H.264 weaves them into progressive frames. Otherwise 25p fallback is shown. This is not DV25.")
-                    Text("Everything is captured locally. Saving requires Photos add-only access.")
+                    Text("Frame in 4:3. Tap the finder to refocus. Select the camera name to change the sensor, image size and microphone response.")
+                    Text("MiniDV saves a frame from the finder when the flash is off. The video microphone softens highs, trims rumble and rounds loud sounds before recording in mono.")
+                    Text("PAL pairs two fields when the camera supports 50 frames per second. Otherwise it records at 25p. Photos and videos are saved to Photos on this iPhone.")
                 }
                 .font(.system(size: 14))
                 .foregroundStyle(ArchiveStyle.muted)

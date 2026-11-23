@@ -39,6 +39,18 @@ float3 cameraResponse(float3 rgb, constant FilterUniforms &p) {
     rgb = min(rgb, p.tone.w) / p.tone.w;
     return pow(rgb, float3(p.tone.z / 2.2));
 }
+// Gentle print-like response in display space, after the sensor and colour encoding.
+float3 memoryColor(float3 rgb) {
+    rgb = clamp(rgb, 0.0, 1.0);
+    float y = dot(rgb, float3(0.299, 0.587, 0.114));
+    float3 chroma = rgb - y;
+    float strongest = max(rgb.r, max(rgb.g, rgb.b)) - min(rgb.r, min(rgb.g, rgb.b));
+    float colourGain = 0.93 - 0.14 * smoothstep(0.18, 0.86, strongest);
+    float tone = 0.022 + 0.951 * y + 0.018 * (4.0 * y * (1.0 - y));
+    float light = smoothstep(0.26, 0.92, y);
+    float3 tint = mix(float3(-0.002, 0.001, 0.004), float3(0.016, 0.005, -0.017), light);
+    return clamp(tone + chroma * colourGain + tint, 0.0, 1.0);
+}
 kernel void retroKernel(
     texture2d<float, access::sample> first [[texture(0)]],
     texture2d<float, access::sample> second [[texture(1)]],
@@ -111,7 +123,7 @@ kernel void retroKernel(
     y = round(y*levels)/levels;
     cbcr = round(cbcr*levels)/levels;
     rgb = float3(y+1.403*cbcr.y,y-0.344*cbcr.x-0.714*cbcr.y,y+1.773*cbcr.x);
-    output.write(float4(clamp(rgb,0.0,1.0),1.0),gid);
+    output.write(float4(memoryColor(rgb),1.0),gid);
 }
 
 struct FullscreenVertex {

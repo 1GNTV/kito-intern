@@ -7,6 +7,8 @@ final class VideoRecorder {
     let url: URL
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
+    private let microphoneModel: CameraMicrophone
+    private var audioProcessingFailed = false
     private let audioInput: AVAssetWriterInput?
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private var firstTime: CMTime?
@@ -15,6 +17,7 @@ final class VideoRecorder {
     private var audioBackpressure = false
 
     init?(profile: CameraProfile, microphone: Bool) {
+        microphoneModel = CameraMicrophone(profile: profile)
         let directory = FileManager.default.temporaryDirectory
         let filename = "ArchiveCam-\(UUID().uuidString).mp4"
         self.url = directory.appendingPathComponent(filename)
@@ -61,7 +64,7 @@ final class VideoRecorder {
                 writer.add(audio)
                 self.audioInput = audio
             } else {
-                self.audioInput = nil
+                return nil
             }
         } else {
             self.audioInput = nil
@@ -92,7 +95,12 @@ final class VideoRecorder {
               CMSampleBufferDataIsReady(sampleBuffer),
               CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= firstTime,
               writer.status == .writing else { return }
-        guard audioInput.isReadyForMoreMediaData, audioInput.append(sampleBuffer) else {
+        guard !audioProcessingFailed else { return }
+        guard let processed = microphoneModel.process(sampleBuffer) else {
+            audioProcessingFailed = true
+            return
+        }
+        guard audioInput.isReadyForMoreMediaData, audioInput.append(processed) else {
             audioBackpressure = true
             return
         }
@@ -101,12 +109,12 @@ final class VideoRecorder {
     func noteDroppedVideoFrame() { videoBackpressure = true }
 
     func finish(_ completion: @escaping (Result<URL, Error>) -> Void) {
-        guard !videoBackpressure && !audioBackpressure else {
+        guard !videoBackpressure && !audioBackpressure && !audioProcessingFailed else {
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: url)
             completion(.failure(NSError(
                 domain: "ArchiveCam", code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Capture or encoder could not keep up; recording discarded."]
+                userInfo: [NSLocalizedDescriptionKey: audioProcessingFailed ? "Microphone audio could not be processed." : "Capture or encoder could not keep up; recording discarded."]
             )))
             return
         }
