@@ -63,15 +63,9 @@ float3 cameraColor(float3 rgb) {
     float room = min((1.0 - tone) / max(high, 0.00001), tone / max(low, 0.00001));
     return clamp(tone + chroma * min(gain, room), 0.0, 1.0);
 }
-kernel void retroKernel(
-    texture2d<float, access::sample> first [[texture(0)]],
-    texture2d<float, access::sample> second [[texture(1)]],
-    texture2d<float, access::write> output [[texture(2)]],
-    constant FilterUniforms &p [[buffer(0)]],
-    uint2 gid [[thread_position_in_grid]]
-) {
-    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
-    float2 size = float2(output.get_width(), output.get_height());
+float3 sensorPixel(texture2d<float, access::sample> first,
+                   texture2d<float, access::sample> second,
+                   constant FilterUniforms &p, uint2 gid, float2 size) {
     float2 uv0 = (float2(gid) + 0.5) / size;
     float sourceAspect = float(first.get_width()) / first.get_height();
     float targetAspect = size.x/size.y;
@@ -139,7 +133,68 @@ kernel void retroKernel(
     y = round(y*levels)/levels;
     cbcr = round(cbcr*levels)/levels;
     rgb = float3(y+1.403*cbcr.y,y-0.344*cbcr.x-0.714*cbcr.y,y+1.773*cbcr.x);
-    output.write(float4(cameraColor(rgb),1.0),gid);
+    return cameraColor(rgb);
+}
+
+// Orthonormal 8-point cosine basis, indexed by frequency then position.
+constant float basis[64] = {
+    0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f, 0.35355339f,
+    0.49039264f, 0.41573481f, 0.27778512f, 0.09754516f, -0.09754516f, -0.27778512f, -0.41573481f, -0.49039264f,
+    0.46193977f, 0.19134172f, -0.19134172f, -0.46193977f, -0.46193977f, -0.19134172f, 0.19134172f, 0.46193977f,
+    0.41573481f, -0.09754516f, -0.49039264f, -0.27778512f, 0.27778512f, 0.49039264f, 0.09754516f, -0.41573481f,
+    0.35355339f, -0.35355339f, -0.35355339f, 0.35355339f, 0.35355339f, -0.35355339f, -0.35355339f, 0.35355339f,
+    0.27778512f, -0.49039264f, 0.09754516f, 0.41573481f, -0.41573481f, -0.09754516f, 0.49039264f, -0.27778512f,
+    0.19134172f, -0.46193977f, 0.46193977f, -0.19134172f, -0.19134172f, 0.46193977f, -0.46193977f, 0.19134172f,
+    0.09754516f, -0.27778512f, 0.41573481f, -0.49039264f, 0.49039264f, -0.41573481f, 0.27778512f, -0.09754516f
+};
+
+kernel void retroKernel(
+    texture2d<float, access::sample> first [[texture(0)]],
+    texture2d<float, access::sample> second [[texture(1)]],
+    texture2d<float, access::write> output [[texture(2)]],
+    constant FilterUniforms &p [[buffer(0)]],
+    uint2 gid [[thread_position_in_grid]],
+    uint2 lane [[thread_position_in_threadgroup]]
+) {
+    uint2 size = uint2(output.get_width(), output.get_height());
+    // Woven PAL frames have two source times. Transform each field separately.
+    if (p.timing.z > 0.5) {
+        uint phase = (gid.y / 8u) & 1u;
+        gid.y = (gid.y / 16u) * 16u + lane.y * 2u + phase;
+    }
+    float3 rgb = sensorPixel(first, second, p, min(gid, size - 1u), float2(size));
+    float y = dot(rgb, float3(0.299, 0.587, 0.114));
+    threadgroup float3 a[8][8], b[8][8];
+    uint u = lane.x, v = lane.y;
+    a[v][u] = 255.0 * float3(y - 0.5, (rgb.b-y)*0.564, (rgb.r-y)*0.713);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float3 row = 0.0;
+    for (uint n=0; n<8; ++n) row += basis[u*8+n] * a[v][n];
+    b[v][u] = row;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float3 coeff = 0.0;
+    for (uint n=0; n<8; ++n) coeff += basis[v*8+n] * b[n][u];
+
+    // Quantise actual coefficients; flat blocks keep their own average and
+    // sharp silhouettes retain low-frequency shape plus characteristic ringing.
+    float freq = float(u+v);
+    float luma = (u+v == 0u) ? 38.0 : 12.0 + 3.5*freq + 0.58*freq*freq;
+    float chroma = (u+v == 0u) ? 44.0 : min(210.0, 21.0 + 11.0*freq + 1.2*freq*freq);
+    float3 step = float3(luma, chroma, chroma) * p.red.w;
+    a[v][u] = round(coeff / step) * step;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float3 column = 0.0;
+    for (uint k=0; k<8; ++k) column += basis[k*8+v] * a[k][u];
+    b[v][u] = column;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float3 decoded = 0.0;
+    for (uint k=0; k<8; ++k) decoded += basis[k*8+u] * b[v][k];
+    decoded /= 255.0;
+    y = decoded.x + 0.5;
+    rgb = float3(y+1.402*decoded.z, y-0.344136*decoded.y-0.714136*decoded.z, y+1.772*decoded.y);
+    if (all(gid < size)) output.write(float4(clamp(rgb,0.0,1.0),1.0),gid);
 }
 
 struct FullscreenVertex {

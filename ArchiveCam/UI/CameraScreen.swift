@@ -201,7 +201,7 @@ struct CameraScreen: View {
                         .accessibilityLabel("Zoom")
                 }
                 Section {
-                    Text("ArchiveCam 0.5 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
+                    Text("ArchiveCam 0.6 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
                         .font(.footnote)
                 }
             }

@@ -132,11 +132,10 @@ final class RenderEngine {
         encoder.setTexture(secondTexture, index: 1)
         encoder.setTexture(outputTexture, index: 2)
         encoder.setBytes(&uniforms, length: MemoryLayout<ImagingRecipe>.stride, index: 0)
-        let w = filterPipeline.threadExecutionWidth
-        let h = max(1, filterPipeline.maxTotalThreadsPerThreadgroup / w)
-        encoder.dispatchThreads(
-            MTLSize(width: outputTexture.width, height: outputTexture.height, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1)
+        // Complete 8×8 transform blocks also cover partial edge tiles.
+        encoder.dispatchThreadgroups(
+            MTLSize(width: (outputTexture.width + 7) / 8, height: (outputTexture.height + 7) / 8, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 1)
         )
         encoder.endEncoding()
         command.commit()

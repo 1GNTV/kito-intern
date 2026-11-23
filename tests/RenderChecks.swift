@@ -37,10 +37,11 @@ struct RenderChecks {
         pixels.withUnsafeBytes {
             input.replace(region: MTLRegionMake2D(0,0,width,height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width*4)
         }
-        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true) throws -> [UInt8] {
+        func run(_ profile: CameraProfile, gain: Float, source: MTLTexture? = nil, aperture: Bool = true, quantisation: Float? = nil) throws -> [UInt8] {
             let output = device.makeTexture(descriptor: desc)!
             var recipe = profile.recipe
             if !aperture { recipe.optics.y = 0 }
+            if let quantisation { recipe.red.w = quantisation }
             recipe.sensor.x = Float(width)
             recipe.sensor.y = Float(height)
             recipe.timing = SIMD4(42,gain,0,profile.family == .camcorder ? 1 : 0)
@@ -127,6 +128,32 @@ struct RenderChecks {
         }
         precondition(abs(patch(40,0)-patch(40,2)) < 3 && abs(patch(40,1)-patch(40,2)) < 3)
         precondition(patch(145,2) > patch(145,1)+70 && patch(250,0) > patch(250,2)+80)
+        // A gentle gradient should show stronger jumps at codec boundaries
+        // than inside blocks. Turning quantisation down removes the steps.
+        for y in 0..<height {
+            for x in 0..<width {
+                let grey = UInt8(75 + x / 3)
+                for c in 0..<3 { pixels[(y*width+x)*4+c] = grey }
+            }
+        }
+        pixels.withUnsafeBytes {
+            input.replace(region: MTLRegionMake2D(0,0,width,height), mipmapLevel: 0,
+                          withBytes: $0.baseAddress!, bytesPerRow: width*4)
+        }
+        func blockContrast(_ data: [UInt8]) -> Double {
+            var border = 0, interior = 0
+            for y in 32..<208 {
+                for x in stride(from: 32, through: 280, by: 8) {
+                    let i = (width*y+x)*4
+                    border += abs(Int(data[i])-Int(data[i-4]))
+                    interior += abs(Int(data[i+16])-Int(data[i+12]))
+                }
+            }
+            return Double(border - interior) / Double(176*32)
+        }
+        let compressed = try run(.miniDV03, gain: 1)
+        let fine = try run(.miniDV03, gain: 1, quantisation: 0.005)
+        precondition(blockContrast(compressed) > blockContrast(fine) + 1)
         print("GPU tests passed; pocket/compact MAE \(distance(pocket,compact)), pocket/DV MAE \(distance(pocket,dv)); four renders wall ms \(Date().timeIntervalSince(start)*1000)")
         for _ in 0..<10 { _ = try run(.compact02,gain:1) }
         print("Synthetic GPU workload complete. Not an iPhone realtime performance measurement.")
