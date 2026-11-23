@@ -1,39 +1,49 @@
 import SwiftUI
+import AVKit
 
 struct CameraScreen: View {
     @StateObject private var camera = CaptureEngine()
     @State private var profile = CameraProfile.startup
     @State private var mode: CaptureMode = .photo
-    @State private var flash = false
-    @State private var zoom = 1.0
+    @Environment(\.scenePhase) private var scenePhase
     @State private var settingsOpen = false
 
     var body: some View {
+        cameraBody
+            .modifier(HardwareShutter(enabled: camera.isReady && !settingsOpen && scenePhase == .active,
+                                      shutter: releaseShutter))
+    }
+
+    private var cameraBody: some View {
         GeometryReader { geometry in
-            let gutter: CGFloat = 8
-            let available = geometry.size
-            let rightWidth = min(112, available.width * 0.18)
-            let leftWidth = min(66, available.width * 0.11)
-            let width = min((available.height - 24) * 4 / 3,
-                            available.width - leftWidth - rightWidth - 4 * gutter - 12)
-            HStack(spacing: gutter) {
-                accessoryRail.frame(width: leftWidth)
-                Spacer(minLength: 0)
-                finder.frame(width: max(1, width), height: max(1, width * 3 / 4))
-                    .padding(5)
-                    .background(.black, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.20), lineWidth: 1))
-                Spacer(minLength: 0)
-                grip.frame(width: rightWidth)
+            let size = geometry.size
+            let width = min(size.width, size.height * 4 / 3)
+            ZStack {
+                finder.frame(width: width, height: width * 3 / 4)
+                HStack {
+                    accessoryRail.frame(width: 56)
+                    Spacer(minLength: 0)
+                    grip.frame(width: 92)
+                }
+                .padding(.horizontal, 4)
+                .opacity(camera.controlsFullscreen ? 0 : 1)
+                .allowsHitTesting(!camera.controlsFullscreen)
+                .accessibilityHidden(camera.controlsFullscreen)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .ignoresSafeArea(.container, edges: .vertical)
+        .statusBarHidden(true)
         .background(CameraBody().ignoresSafeArea())
         .foregroundStyle(ArchiveStyle.chalk)
         .onAppear { camera.select(profile); camera.start() }
         .onDisappear { camera.stop() }
         .onChange(of: mode) { _, value in camera.setMode(value) }
-        .onChange(of: zoom) { _, value in camera.setZoom(value) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { camera.stop() }
+            if phase == .active && !camera.isReady { camera.start() }
+        }
+        .onChange(of: settingsOpen) { _, shown in camera.enableSideControls(!shown) }
         .task(id: camera.status) {
             statusVisible = true
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
@@ -50,19 +60,26 @@ struct CameraScreen: View {
             }
             .disabled(camera.isRecording)
             .accessibilityLabel("Camera settings")
-            if mode == .photo {
-                Button {
-                    flash.toggle()
-                    camera.setFlash(flash)
-                } label: {
-                    Image(systemName: flash ? "bolt.fill" : "bolt.slash")
-                        .foregroundStyle(flash ? ArchiveStyle.signal : ArchiveStyle.chalk)
-                        .frame(width: 44, height: 44)
+            let isPhoto = mode == .photo
+            let on = isPhoto ? camera.flashOn : camera.torchOn
+            let available = isPhoto ? camera.flashAvailable : camera.torchAvailable
+            Button { camera.toggleLight() } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: isPhoto ? (on ? "bolt.fill" : "bolt.slash")
+                                              : (on ? "flashlight.on.fill" : "flashlight.off.fill"))
+                    Text(isPhoto ? "FLASH" : "LIGHT")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
                 }
-                .accessibilityLabel(flash ? "Turn flash off" : "Turn flash on")
-            } else {
+                .foregroundStyle(on ? ArchiveStyle.signal : ArchiveStyle.chalk)
+                .frame(width: 52, height: 48)
+                .modifier(CameraGlass(shape: RoundedRectangle(cornerRadius: 13)))
+            }
+            .disabled(!camera.isReady || !available)
+            .accessibilityLabel(isPhoto ? "Photo flash" : "Video light")
+            .accessibilityValue(available ? (on ? "On" : "Off") : "Unavailable")
+            if !isPhoto {
                 Image(systemName: camera.hasMicrophone ? "mic.fill" : "mic.slash")
-                    .frame(width: 44, height: 44)
+                    .font(.caption)
                     .accessibilityLabel(camera.hasMicrophone ? "Mono microphone on" : "Microphone unavailable")
             }
         }
@@ -89,9 +106,7 @@ struct CameraScreen: View {
             .padding(2).background(.black.opacity(0.70), in: Capsule())
             .disabled(camera.isRecording)
 
-            Button {
-                if mode == .photo { camera.shootPhoto() } else { camera.toggleRecording() }
-            } label: {
+            Button(action: releaseShutter) {
                 ShutterCap(video: mode == .video, recording: camera.isRecording)
             }
             .buttonStyle(ShutterPress())
@@ -108,8 +123,12 @@ struct CameraScreen: View {
         .buttonStyle(.plain)
     }
 
+    private func releaseShutter() {
+        if mode == .photo { camera.shootPhoto() } else { camera.toggleRecording() }
+    }
+
     private func rocker(_ label: String, step: Double) -> some View {
-        Button { zoom = min(6, max(1, zoom + step)) } label: {
+        Button { camera.setZoom(camera.zoomFactor + step) } label: {
             Text(label).font(.system(size: 12, weight: .bold, design: .monospaced))
                 .frame(maxWidth: .infinity, minHeight: 42).contentShape(Rectangle())
         }
@@ -138,11 +157,12 @@ struct CameraScreen: View {
                 }
                 Spacer()
                 HStack {
-                    Text(String(format: "AF   %.1f×", zoom))
+                    Text(String(format: "AF   %.1f×", camera.zoomFactor))
                     Spacer()
                     Text(mode == .photo ? "4:3" : cadenceTitle)
                 }
             }
+            .opacity(camera.controlsFullscreen ? 0 : 1)
             .padding(11)
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
             .foregroundStyle(.white).shadow(color: .black, radius: 2)
@@ -176,7 +196,7 @@ struct CameraScreen: View {
                         Button {
                             profile = device
                             camera.select(device)
-                            zoom = 1
+                            camera.setZoom(1)
                             settingsOpen = false
                         } label: {
                             HStack {
@@ -207,11 +227,13 @@ struct CameraScreen: View {
                     }
                 }
                 Section("Zoom") {
-                    Slider(value: $zoom, in: 1...6, step: 0.1)
+                    Slider(value: Binding(get: { camera.zoomFactor }, set: { camera.setZoom($0) }),
+                           in: 1...max(1.1, camera.touchZoomLimit, camera.zoomFactor), step: 0.1)
+                        .disabled(camera.touchZoomLimit <= 1)
                         .accessibilityLabel("Zoom")
                 }
                 Section {
-                    Text("ArchiveCam 0.8 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
+                    Text("ArchiveCam 0.9 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
                         .font(.footnote)
                 }
             }
@@ -226,5 +248,21 @@ struct CameraScreen: View {
         profile.prefersTemporalFields = fields
         camera.select(profile)
         settingsOpen = false
+    }
+}
+
+
+private struct HardwareShutter: ViewModifier {
+    let enabled: Bool
+    let shutter: () -> Void
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onCameraCaptureEvent(isEnabled: enabled) { event in
+                if event.phase == .ended { shutter() }
+            }
+        } else {
+            content
+        }
     }
 }

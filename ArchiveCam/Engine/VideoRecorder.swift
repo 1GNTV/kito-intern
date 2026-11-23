@@ -56,7 +56,7 @@ final class VideoRecorder {
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 44_100,
                 AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 96_000
+                AVEncoderBitRateKey: profile.family == .camcorder ? 80_000 : 48_000
             ]
             let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             audio.expectsMediaDataInRealTime = true

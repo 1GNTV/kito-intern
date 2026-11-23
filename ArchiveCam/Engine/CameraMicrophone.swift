@@ -4,7 +4,16 @@ import AVFoundation
 final class CameraMicrophone {
     private let lowCut: Float
     private let highCut: Float
-    private let threshold: Float
+    private let quietGain: Float
+    private let presence: Float
+    private let recoveryTime: Float
+    private let drive: Float
+    private var midLow: Float = 0
+    private var midHigh: Float = 0
+    private var preampGain: Float = 1
+    private var activity: Float = 0
+    private var hissMemory: Float = 0
+    private var randomState: UInt32 = 0x745dc97
     private var converter: AVAudioConverter?
     private var rumble: Float = 0
     private var low1: Float = 0
@@ -14,9 +23,12 @@ final class CameraMicrophone {
 
     init(profile: CameraProfile) {
         let dv = profile.family == .camcorder
-        lowCut = dv ? 105 : 165
-        highCut = dv ? 6500 : (profile.id == "compact02" ? 3600 : 4700)
-        threshold = dv ? 0.25 : 0.20
+        lowCut = dv ? 135 : 205
+        highCut = dv ? 6100 : (profile.id == "compact02" ? 3000 : 4050)
+        quietGain = dv ? 1.85 : 2.45
+        presence = dv ? 0.36 : 0.65
+        recoveryTime = dv ? 0.40 : 0.64
+        drive = dv ? 1.18 : 1.38
     }
 
     func process(_ sample: CMSampleBuffer) -> CMSampleBuffer? {
@@ -35,7 +47,16 @@ final class CameraMicrophone {
             converter?.downmix = true
         }
         if changed || (nextTime.isNumeric && abs((pts - nextTime).seconds) > 0.02) {
-            rumble = 0; low1 = 0; low2 = 0; envelope = 0
+            rumble = 0
+            low1 = 0
+            low2 = 0
+            midLow = 0
+            midHigh = 0
+            envelope = 0
+            preampGain = 1
+            activity = 0
+            hissMemory = 0
+            randomState = 0x745dc97
             converter?.reset()
         }
         guard let converter,
@@ -51,18 +72,38 @@ final class CameraMicrophone {
         let hz = Float(rate)
         let bass = 1 - exp(-2 * .pi * lowCut / hz)
         let treble = 1 - exp(-2 * .pi * highCut / hz)
-        let attack = 1 - exp(-1 / (0.008 * hz))
-        let release = 1 - exp(-1 / (0.22 * hz))
+        let lowerMid = 1 - exp(-2 * .pi * 800 / hz)
+        let upperMid = 1 - exp(-2 * .pi * 2900 / hz)
+        let attack = 1 - exp(-1 / (0.005 * hz))
+        let release = 1 - exp(-1 / (0.075 * hz))
+        let gainDown = 1 - exp(-1 / (0.012 * hz))
+        let gainUp = 1 - exp(-1 / (recoveryTime * hz))
+        let roomDecay = exp(-1 / (0.10 * hz))
         for i in 0..<count {
             let x = samples[i]
             rumble += bass * (x - rumble)
             low1 += treble * (x - rumble - low1)
             low2 += treble * (low1 - low2)
-            let peak = abs(low2)
+            midLow += lowerMid * (low2 - midLow)
+            midHigh += upperMid * (low2 - midHigh)
+            let mic = low2 + presence * (midHigh - midLow)
+            let peak = abs(mic)
             envelope += (peak > envelope ? attack : release) * (peak - envelope)
-            let gain = 1 / (1 + 1.5 * max(0, envelope - threshold))
-            let driven = 1.11 * low2 * gain
-            samples[i] = driven / (1 + 0.17 * abs(driven))
+
+            // The small preamp turns down on a nearby sound, then slowly brings
+            // back the room between phrases. The maximum lift is bounded.
+            let targetGain = max(0.45, quietGain / (1 + 5.5 * envelope))
+            preampGain += (targetGain < preampGain ? gainDown : gainUp) * (targetGain - preampGain)
+            let driven = drive * mic * preampGain
+            let limited = driven / (1 + 0.70 * abs(driven))
+
+            // A quiet, band-limited electronics floor follows an active mic.
+            // Disconnected/muted input starts silent and a trailing floor decays.
+            activity = max(min(1, abs(x) * 180), activity * roomDecay)
+            randomState = randomState &* 1664525 &+ 1013904223
+            let noise = Float(randomState >> 8) / 8388608 - 1
+            hissMemory += treble * (noise - hissMemory)
+            samples[i] = max(-1, min(1, limited + 0.00125 * preampGain * activity * hissMemory))
         }
         nextTime = pts + CMTime(value: CMTimeValue(count), timescale: CMTimeScale(rate.rounded()))
         return Self.timedBuffer(output, at: pts)

@@ -38,7 +38,41 @@ struct AudioChecks {
         return sqrt(energy / 1200)
     }
 
+    static func checkGainRecovery() {
+        let mic = CameraMicrophone(profile: .ccd3MP)
+        var index = 0
+        func burst(_ blocks: Int, amplitude: Double) -> Double {
+            var last = 0.0
+            for _ in 0..<blocks {
+                let output = mic.process(tone(1000, amplitude, frames: 1200, start: index))!
+                index += 1200
+                let desc = CMSampleBufferGetFormatDescription(output)!
+                let pcm = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(cmAudioFormatDescription: desc),
+                                           frameCapacity: 1200)!
+                pcm.frameLength = 1200
+                precondition(CMSampleBufferCopyPCMDataIntoAudioBufferList(output, at: 0, frameCount: 1200,
+                                                                         into: pcm.mutableAudioBufferList) == noErr)
+                var power = 0.0
+                for i in 0..<1200 {
+                    let x = Double(pcm.floatChannelData![0][i])
+                    precondition(x.isFinite && abs(x) <= 1)
+                    power += x * x
+                }
+                last = sqrt(power / 1200)
+            }
+            return last
+        }
+        let room = burst(80, amplitude: 0.025)
+        _ = burst(12, amplitude: 0.8)
+        let afterPeak = burst(2, amplitude: 0.025)
+        let recovered = burst(80, amplitude: 0.025)
+        precondition(afterPeak < room * 0.75, "a loud sound should turn down the preamp")
+        precondition(recovered > room * 0.94, "the room should return between phrases")
+        precondition(burst(90, amplitude: 0) < 0.00001, "the floor must decay on mute")
+    }
+
     static func main() async throws {
+        checkGainRecovery()
         let voice = level(1000, 0.12, .miniDV03)
         precondition(voice > 0.04)
         precondition(level(30, 0.12, .miniDV03) < voice * 0.40)
