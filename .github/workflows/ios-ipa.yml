@@ -1,10 +1,7 @@
-name: Build unsigned iOS IPA
+name: Build ArchiveCam 0.8 with Xcode 26.3
 on:
   push:
     branches: [build/archivecam-0.8]
-  workflow_dispatch:
-  pull_request:
-    branches: [main]
 jobs:
   ios:
     runs-on: macos-15
