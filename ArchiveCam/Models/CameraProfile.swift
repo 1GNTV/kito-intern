@@ -35,6 +35,19 @@ struct CameraProfile: Identifiable, Equatable {
     let chromaMisregistration: Float
     let cornerFalloff: Float
 
+    // Format reference: Nikon COOLPIX 3200. Colour is an interpretation,
+    // not a measured camera match.
+    static let ccd3MP = CameraProfile(
+        id: "ccd3mp", name: "COMPACT CCD 3MP", era: "2004 / CCD",
+        family: .compact, descriptor: "3 MP compact still camera / natural colour JPEG",
+        photoWidth: 2048, photoHeight: 1536, videoWidth: 640, videoHeight: 480,
+        videoFPS: 15, prefersTemporalFields: false, jpegQuality: 0.83,
+        saturation: 1.04, contrast: 1.02, warmth: 0,
+        sensorNoise: 0.006, opticalSoftness: 0.30, highlightBloom: 0.10,
+        chromaMisregistration: 0.15, cornerFalloff: 0.045
+    )
+    static let startup = ccd3MP
+
     static let compact04 = CameraProfile(
         id: "compact04",
         name: "COMPACT 04",
@@ -81,6 +94,16 @@ struct CameraProfile: Identifiable, Equatable {
     )
 
     var recipe: ImagingRecipe {
+        if id == Self.ccd3MP.id {
+            return ImagingRecipe(
+                sensor: SIMD4(0, 0, sensorNoise, 0.003),
+                optics: SIMD4(opticalSoftness, 0.38, chromaMisregistration, cornerFalloff),
+                tone: SIMD4(0.002, 1.07, 1.01, 0.98),
+                red: SIMD4(1.012, -0.008, -0.004, 0.18),
+                green: SIMD4(-0.004, 1.012, -0.008, 0),
+                blue: SIMD4(-0.005, -0.013, 1.018, 0),
+                encoding: SIMD4(2, 2, 255, highlightBloom), timing: .zero)
+        }
         if id == "compact02" {
             return ImagingRecipe(
                 sensor: SIMD4(0, 0, 0.011, 0.009),
@@ -113,5 +136,5 @@ struct CameraProfile: Identifiable, Equatable {
             timing: .zero)
     }
 
-    static let all: [CameraProfile] = [.compact02, .compact04, .miniDV03]
+    static let all: [CameraProfile] = [.ccd3MP, .compact02, .compact04, .miniDV03]
 }

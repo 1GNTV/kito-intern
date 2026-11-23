@@ -2,7 +2,7 @@ import SwiftUI
 
 struct CameraScreen: View {
     @StateObject private var camera = CaptureEngine()
-    @State private var profile = CameraProfile.miniDV03
+    @State private var profile = CameraProfile.startup
     @State private var mode: CaptureMode = .photo
     @State private var flash = false
     @State private var zoom = 1.0
@@ -201,7 +201,7 @@ struct CameraScreen: View {
                         .accessibilityLabel("Zoom")
                 }
                 Section {
-                    Text("ArchiveCam 0.6 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
+                    Text("ArchiveCam 0.7 · \(profile.photoWidth)×\(profile.photoHeight) JPEG · \(profile.videoWidth)×\(profile.videoHeight) video")
                         .font(.footnote)
                 }
             }

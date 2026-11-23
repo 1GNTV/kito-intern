@@ -5,7 +5,8 @@ import Metal
 struct RenderChecks {
     static func main() throws {
         precondition(MemoryLayout<ImagingRecipe>.stride == 128)
-        precondition(CameraProfile.all.count == 3)
+        precondition(CameraProfile.all.count == 4)
+        precondition(CameraProfile.startup.family == .compact && CameraProfile.startup.photoWidth == 2048)
         precondition(CameraProfile.compact02.videoFPS == 15)
         for p in CameraProfile.all {
             precondition(p.photoWidth * 3 == p.photoHeight * 4)
@@ -154,6 +155,8 @@ struct RenderChecks {
         let compressed = try run(.miniDV03, gain: 1)
         let fine = try run(.miniDV03, gain: 1, quantisation: 0.005)
         precondition(blockContrast(compressed) > blockContrast(fine) + 1)
+        let compactGradient = try run(.startup, gain: 1)
+        precondition(blockContrast(compactGradient) < blockContrast(compressed))
         print("GPU tests passed; pocket/compact MAE \(distance(pocket,compact)), pocket/DV MAE \(distance(pocket,dv)); four renders wall ms \(Date().timeIntervalSince(start)*1000)")
         for _ in 0..<10 { _ = try run(.compact02,gain:1) }
         print("Synthetic GPU workload complete. Not an iPhone realtime performance measurement.")

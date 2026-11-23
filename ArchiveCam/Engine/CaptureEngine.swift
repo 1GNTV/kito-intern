@@ -28,7 +28,7 @@ final class CaptureEngine: NSObject, ObservableObject,
     private let photoQueue = DispatchQueue(label: "cam.archive.stills", qos: .userInitiated)
     private var camera: AVCaptureDevice?
     private var configured = false
-    private var activeProfile = CameraProfile.miniDV03
+    private var activeProfile = CameraProfile.startup
     private var orientation: AVCaptureVideoOrientation = .landscapeRight
     private var recorder: VideoRecorder?
     private var microphoneGranted = false
